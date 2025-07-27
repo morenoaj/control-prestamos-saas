@@ -1,487 +1,333 @@
+// src/app/(dashboard)/dashboard/page.tsx
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/context/AuthContext'
-import { useCompany } from '@/context/CompanyContext'
-import { toast } from '@/hooks/use-toast'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { 
-  Building2, 
-  CheckCircle, 
-  ArrowRight, 
-  Loader2,
-  Users,
-  CreditCard,
-  BarChart3,
-  Shield,
-  Smartphone,
-  TrendingUp
+  Users, 
+  CreditCard, 
+  DollarSign, 
+  TrendingUp,
+  AlertCircle,
+  Calendar,
+  CheckCircle,
+  Clock,
+  ArrowUpRight,
+  ArrowDownRight,
+  Plus
 } from 'lucide-react'
+import Link from 'next/link'
 
-const empresaSchema = z.object({
-  nombre: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
-  email: z.string().email('Email inválido'),
-  telefono: z.string().min(10, 'Teléfono debe tener al menos 10 dígitos'),
-  direccion: z.string().min(5, 'La dirección debe tener al menos 5 caracteres'),
-  plan: z.enum(['basico', 'premium', 'enterprise']),
-  tasaInteresDefault: z.number().min(0.1).max(100),
-  monedaDefault: z.string().min(1),
-  diasGracia: z.number().min(0).max(30),
-})
+export default function DashboardPage() {
+  const { usuario, empresaActual } = useAuth()
 
-type EmpresaFormData = z.infer<typeof empresaSchema>
+  // Datos simulados - en producción vendrían de Firebase
+  const stats = {
+    totalClientes: 156,
+    prestamosActivos: 89,
+    montoTotal: 487500,
+    pagosHoy: 15,
+    pagosPendientes: 23,
+    montoRecaudado: 45800,
+    tasaRecuperacion: 94.5
+  }
 
-const planes = [
-  {
-    id: 'basico',
-    nombre: 'Básico',
-    precio: 29,
-    descripcion: 'Para emprendedores',
-    limites: {
-      maxClientes: 100,
-      maxPrestamos: 500,
-      maxUsuarios: 1
+  const prestamosRecientes = [
+    {
+      id: 'P-001',
+      cliente: 'María González',
+      monto: 5000,
+      fechaVencimiento: '2025-01-30',
+      estado: 'activo'
     },
-    caracteristicas: [
-      'Hasta 100 clientes',
-      'Hasta 500 préstamos',
-      'Reportes básicos',
-      'Soporte por email'
-    ]
-  },
-  {
-    id: 'premium',
-    nombre: 'Premium',
-    precio: 79,
-    descripcion: 'Para pequeñas empresas',
-    limites: {
-      maxClientes: 1000,
-      maxPrestamos: -1, // ilimitado
-      maxUsuarios: 5
+    {
+      id: 'P-002', 
+      cliente: 'Carlos Ruiz',
+      monto: 3500,
+      fechaVencimiento: '2025-02-15',
+      estado: 'atrasado'
     },
-    caracteristicas: [
-      'Hasta 1,000 clientes',
-      'Préstamos ilimitados',
-      'Reportes avanzados',
-      'Notificaciones automáticas',
-      'Soporte prioritario'
-    ],
-    popular: true
-  },
-  {
-    id: 'enterprise',
-    nombre: 'Enterprise',
-    precio: 199,
-    descripcion: 'Para grandes empresas',
-    limites: {
-      maxClientes: -1, // ilimitado
-      maxPrestamos: -1, // ilimitado
-      maxUsuarios: -1 // ilimitado
+    {
+      id: 'P-003',
+      cliente: 'Ana López',
+      monto: 8000,
+      fechaVencimiento: '2025-02-01',
+      estado: 'activo'
+    }
+  ]
+
+  const pagosProximos = [
+    {
+      cliente: 'Roberto Silva',
+      monto: 850,
+      fecha: '2025-01-27',
+      telefono: '+507 6000-0001'
     },
-    caracteristicas: [
-      'Clientes ilimitados',
-      'Múltiples empresas',
-      'API completa',
-      'Integraciones personalizadas',
-      'Soporte 24/7'
-    ]
-  }
-]
-
-const pasos = [
-  { numero: 1, titulo: 'Información de Empresa', icono: Building2 },
-  { numero: 2, titulo: 'Seleccionar Plan', icono: CreditCard },
-  { numero: 3, titulo: 'Configuración Inicial', icono: BarChart3 },
-]
-
-export default function OnboardingPage() {
-  const [pasoActual, setPasoActual] = useState(1)
-  const [isLoading, setIsLoading] = useState(false)
-  const [planSeleccionado, setPlanSeleccionado] = useState<string>('')
-  const router = useRouter()
-  const { user, reloadUser } = useAuth()
-  const { crearEmpresa } = useCompany()
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    setValue,
-    watch,
-    trigger
-  } = useForm<EmpresaFormData>({
-    resolver: zodResolver(empresaSchema),
-    defaultValues: {
-      email: user?.email || '',
-      monedaDefault: 'USD',
-      tasaInteresDefault: 15,
-      diasGracia: 3,
-      plan: 'premium'
+    {
+      cliente: 'Carmen Díaz',
+      monto: 1200,
+      fecha: '2025-01-28',
+      telefono: '+507 6000-0002'
+    },
+    {
+      cliente: 'Luis Martín',
+      monto: 750,
+      fecha: '2025-01-29',
+      telefono: '+507 6000-0003'
     }
-  })
-
-  const formData = watch()
-
-  const siguiente = async () => {
-    let camposAValidar: (keyof EmpresaFormData)[] = []
-    
-    if (pasoActual === 1) {
-      camposAValidar = ['nombre', 'email', 'telefono', 'direccion']
-    }
-    
-    const isValid = await trigger(camposAValidar)
-    
-    if (isValid) {
-      setPasoActual(pasoActual + 1)
-    }
-  }
-
-  const anterior = () => {
-    setPasoActual(pasoActual - 1)
-  }
-
-  const onSubmit = async (data: EmpresaFormData) => {
-    setIsLoading(true)
-    
-    try {
-      const planData = planes.find(p => p.id === data.plan)!
-      
-      // Calcular fecha de vencimiento (30 días desde hoy)
-      const fechaVencimiento = new Date()
-      fechaVencimiento.setDate(fechaVencimiento.getDate() + 30)
-      
-      const empresaData = {
-        nombre: data.nombre,
-        email: data.email,
-        telefono: data.telefono,
-        direccion: data.direccion,
-        plan: data.plan as 'basico' | 'premium' | 'enterprise',
-        estado: 'activa' as const,
-        fechaVencimiento,
-        configuracion: {
-          tasaInteresDefault: data.tasaInteresDefault,
-          monedaDefault: data.monedaDefault,
-          diasGracia: data.diasGracia,
-          colorTema: '#2563eb'
-        },
-        limites: planData.limites
-      }
-
-      const empresaId = await crearEmpresa(empresaData)
-      
-      // Recargar datos del usuario para obtener la nueva empresa
-      await reloadUser()
-      
-      toast({
-        title: "¡Empresa creada exitosamente! 🎉",
-        description: `${data.nombre} ha sido configurada correctamente`,
-      })
-      
-      // Pequeña pausa para que el usuario vea el mensaje
-      setTimeout(() => {
-        router.push('/dashboard')
-      }, 1500)
-      
-    } catch (error: any) {
-      console.error('Error creando empresa:', error)
-      toast({
-        title: "Error",
-        description: error.message || "No se pudo crear la empresa. Intenta nuevamente.",
-        variant: "destructive"
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  ]
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 py-12">
-      <div className="container mx-auto px-4 max-w-4xl">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            ¡Bienvenido a Control de Préstamos! 🎉
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">
+            ¡Bienvenido, {usuario?.nombre}! 👋
           </h1>
-          <p className="text-xl text-gray-600">
-            Configuremos tu empresa en solo 3 pasos
+          <p className="text-gray-600 mt-2">
+            Aquí tienes un resumen de {empresaActual?.nombre}
           </p>
         </div>
-
-        {/* Indicador de pasos */}
-        <div className="flex justify-center mb-12">
-          <div className="flex items-center space-x-8">
-            {pasos.map((paso) => (
-              <div key={paso.numero} className="flex items-center">
-                <div className={`flex items-center justify-center w-12 h-12 rounded-full border-2 transition-all ${
-                  pasoActual >= paso.numero
-                    ? 'bg-blue-600 border-blue-600 text-white'
-                    : 'border-gray-300 text-gray-500'
-                }`}>
-                  {pasoActual > paso.numero ? (
-                    <CheckCircle className="w-6 h-6" />
-                  ) : (
-                    <paso.icono className="w-6 h-6" />
-                  )}
-                </div>
-                <div className="ml-3 text-left">
-                  <div className="text-sm font-medium text-gray-900">{paso.titulo}</div>
-                  <div className="text-xs text-gray-500">Paso {paso.numero}</div>
-                </div>
-                {paso.numero < pasos.length && (
-                  <ArrowRight className="w-5 h-5 text-gray-400 ml-8" />
-                )}
-              </div>
-            ))}
-          </div>
+        <div className="mt-4 sm:mt-0 flex space-x-3">
+          <Link href="/dashboard/prestamos/nuevo">
+            <Button className="bg-blue-600 hover:bg-blue-700">
+              <Plus className="w-4 h-4 mr-2" />
+              Nuevo Préstamo
+            </Button>
+          </Link>
+          <Link href="/dashboard/clientes/nuevo">
+            <Button variant="outline">
+              <Plus className="w-4 h-4 mr-2" />
+              Nuevo Cliente
+            </Button>
+          </Link>
         </div>
+      </div>
 
-        <form onSubmit={handleSubmit(onSubmit)}>
-          {/* Paso 1: Información de Empresa */}
-          {pasoActual === 1 && (
-            <Card className="animate-slide-up">
-              <CardHeader>
-                <CardTitle className="flex items-center text-2xl">
-                  <Building2 className="mr-3 h-7 w-7 text-blue-600" />
-                  Información de tu Empresa
-                </CardTitle>
-                <CardDescription>
-                  Cuéntanos sobre tu empresa para personalizar la experiencia
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="nombre">Nombre de la Empresa *</Label>
-                    <Input
-                      id="nombre"
-                      placeholder="Mi Empresa de Préstamos"
-                      {...register('nombre')}
-                      className={errors.nombre ? 'border-red-500' : ''}
-                    />
-                    {errors.nombre && (
-                      <p className="text-sm text-red-500">{errors.nombre.message}</p>
-                    )}
-                  </div>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Total Clientes */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">
+              Total Clientes
+            </CardTitle>
+            <Users className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-gray-900">{stats.totalClientes}</div>
+            <div className="flex items-center text-xs text-green-600 mt-1">
+              <ArrowUpRight className="h-3 w-3 mr-1" />
+              +12% vs mes anterior
+            </div>
+          </CardContent>
+        </Card>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email Empresarial *</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="contacto@miempresa.com"
-                      {...register('email')}
-                      className={errors.email ? 'border-red-500' : ''}
-                    />
-                    {errors.email && (
-                      <p className="text-sm text-red-500">{errors.email.message}</p>
-                    )}
-                  </div>
+        {/* Préstamos Activos */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">
+              Préstamos Activos
+            </CardTitle>
+            <CreditCard className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-gray-900">{stats.prestamosActivos}</div>
+            <div className="flex items-center text-xs text-green-600 mt-1">
+              <ArrowUpRight className="h-3 w-3 mr-1" />
+              +8% vs mes anterior
+            </div>
+          </CardContent>
+        </Card>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="telefono">Teléfono *</Label>
-                    <Input
-                      id="telefono"
-                      placeholder="+507 6000-0000"
-                      {...register('telefono')}
-                      className={errors.telefono ? 'border-red-500' : ''}
-                    />
-                    {errors.telefono && (
-                      <p className="text-sm text-red-500">{errors.telefono.message}</p>
-                    )}
-                  </div>
+        {/* Monto Total */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">
+              Cartera Total
+            </CardTitle>
+            <DollarSign className="h-4 w-4 text-purple-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-gray-900">
+              ${stats.montoTotal.toLocaleString()}
+            </div>
+            <div className="flex items-center text-xs text-green-600 mt-1">
+              <ArrowUpRight className="h-3 w-3 mr-1" />
+              +15% vs mes anterior
+            </div>
+          </CardContent>
+        </Card>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="direccion">Dirección *</Label>
-                    <Input
-                      id="direccion"
-                      placeholder="Calle Principal, Ciudad, País"
-                      {...register('direccion')}
-                      className={errors.direccion ? 'border-red-500' : ''}
-                    />
-                    {errors.direccion && (
-                      <p className="text-sm text-red-500">{errors.direccion.message}</p>
-                    )}
-                  </div>
-                </div>
+        {/* Tasa de Recuperación */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">
+              Tasa Recuperación
+            </CardTitle>
+            <TrendingUp className="h-4 w-4 text-orange-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-gray-900">{stats.tasaRecuperacion}%</div>
+            <div className="flex items-center text-xs text-red-600 mt-1">
+              <ArrowDownRight className="h-3 w-3 mr-1" />
+              -2% vs mes anterior
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-                <div className="flex justify-end">
-                  <Button onClick={siguiente} className="px-8">
-                    Siguiente
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Paso 2: Selección de Plan */}
-          {pasoActual === 2 && (
-            <div className="animate-slide-up">
-              <Card className="mb-8">
-                <CardHeader>
-                  <CardTitle className="flex items-center text-2xl">
-                    <CreditCard className="mr-3 h-7 w-7 text-blue-600" />
-                    Selecciona tu Plan
-                  </CardTitle>
-                  <CardDescription>
-                    Elige el plan que mejor se adapte a las necesidades de tu empresa
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-
-              <div className="grid md:grid-cols-3 gap-6 mb-8">
-                {planes.map((plan) => (
-                  <Card 
-                    key={plan.id}
-                    className={`relative cursor-pointer transition-all duration-300 hover:shadow-lg ${
-                      formData.plan === plan.id 
-                        ? 'ring-2 ring-blue-500 shadow-lg' 
-                        : ''
-                    } ${plan.popular ? 'border-blue-500' : ''}`}
-                    onClick={() => setValue('plan', plan.id as any)}
-                  >
-                    {plan.popular && (
-                      <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                        <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-bold">
-                          🔥 Más Popular
-                        </span>
-                      </div>
-                    )}
-                    <CardHeader className="text-center">
-                      <CardTitle className="text-xl">{plan.nombre}</CardTitle>
-                      <CardDescription>{plan.descripcion}</CardDescription>
-                      <div className="text-3xl font-bold text-blue-600">
-                        ${plan.precio}<span className="text-sm font-normal text-gray-500">/mes</span>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="space-y-2">
-                        {plan.caracteristicas.map((caracteristica, index) => (
-                          <li key={index} className="flex items-center text-sm">
-                            <CheckCircle className="h-4 w-4 text-green-500 mr-2 flex-shrink-0" />
-                            {caracteristica}
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                ))}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Préstamos Recientes */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Préstamos Recientes</CardTitle>
+                <CardDescription>Últimos préstamos registrados</CardDescription>
               </div>
+              <Link href="/dashboard/prestamos">
+                <Button variant="outline" size="sm">Ver todos</Button>
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {prestamosRecientes.map((prestamo) => (
+                <div key={prestamo.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-3 h-3 rounded-full ${
+                      prestamo.estado === 'activo' ? 'bg-green-500' : 'bg-red-500'
+                    }`} />
+                    <div>
+                      <p className="font-medium text-gray-900">{prestamo.cliente}</p>
+                      <p className="text-sm text-gray-500">{prestamo.id}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium text-gray-900">${prestamo.monto.toLocaleString()}</p>
+                    <p className="text-sm text-gray-500">{prestamo.fechaVencimiento}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={anterior}>
-                  Anterior
-                </Button>
-                <Button onClick={siguiente} disabled={!formData.plan}>
-                  Siguiente
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
+        {/* Pagos Próximos */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Pagos Próximos</CardTitle>
+                <CardDescription>Próximos 3 días</CardDescription>
+              </div>
+              <Link href="/dashboard/pagos">
+                <Button variant="outline" size="sm">Ver todos</Button>
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {pagosProximos.map((pago, index) => (
+                <div key={index} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg border border-orange-200">
+                  <div className="flex items-center space-x-3">
+                    <Calendar className="w-4 h-4 text-orange-600" />
+                    <div>
+                      <p className="font-medium text-gray-900">{pago.cliente}</p>
+                      <p className="text-sm text-gray-500">{pago.telefono}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium text-gray-900">${pago.monto}</p>
+                    <p className="text-sm text-orange-600">{pago.fecha}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Resumen del Día */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Resumen de Hoy</CardTitle>
+          <CardDescription>Actividad del día {new Date().toLocaleDateString('es-PA')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-green-100 rounded-lg">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{stats.pagosHoy}</p>
+                <p className="text-sm text-gray-600">Pagos recibidos</p>
               </div>
             </div>
-          )}
+            
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-yellow-100 rounded-lg">
+                <Clock className="w-5 h-5 text-yellow-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{stats.pagosPendientes}</p>
+                <p className="text-sm text-gray-600">Pagos pendientes</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <DollarSign className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">${stats.montoRecaudado.toLocaleString()}</p>
+                <p className="text-sm text-gray-600">Total recaudado</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-          {/* Paso 3: Configuración Inicial */}
-          {pasoActual === 3 && (
-            <Card className="animate-slide-up">
-              <CardHeader>
-                <CardTitle className="flex items-center text-2xl">
-                  <BarChart3 className="mr-3 h-7 w-7 text-blue-600" />
-                  Configuración Inicial
-                </CardTitle>
-                <CardDescription>
-                  Define las configuraciones por defecto para tu empresa
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid md:grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="monedaDefault">Moneda Principal</Label>
-                    <Select onValueChange={(value) => setValue('monedaDefault', value)} defaultValue="USD">
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleccionar moneda" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="USD">USD - Dólar</SelectItem>
-                        <SelectItem value="PAB">PAB - Balboa</SelectItem>
-                        <SelectItem value="EUR">EUR - Euro</SelectItem>
-                        <SelectItem value="MXN">MXN - Peso Mexicano</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="tasaInteresDefault">Tasa de Interés por Defecto (%)</Label>
-                    <Input
-                      id="tasaInteresDefault"
-                      type="number"
-                      step="0.1"
-                      min="0.1"
-                      max="100"
-                      {...register('tasaInteresDefault', { valueAsNumber: true })}
-                      className={errors.tasaInteresDefault ? 'border-red-500' : ''}
-                    />
-                    {errors.tasaInteresDefault && (
-                      <p className="text-sm text-red-500">{errors.tasaInteresDefault.message}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="diasGracia">Días de Gracia</Label>
-                    <Input
-                      id="diasGracia"
-                      type="number"
-                      min="0"
-                      max="30"
-                      {...register('diasGracia', { valueAsNumber: true })}
-                      className={errors.diasGracia ? 'border-red-500' : ''}
-                    />
-                    {errors.diasGracia && (
-                      <p className="text-sm text-red-500">{errors.diasGracia.message}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Resumen de configuración */}
-                <div className="bg-blue-50 rounded-lg p-6">
-                  <h3 className="font-semibold text-blue-900 mb-4">📋 Resumen de Configuración</h3>
-                  <div className="grid md:grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium">Empresa:</span> {formData.nombre}
-                    </div>
-                    <div>
-                      <span className="font-medium">Plan:</span> {planes.find(p => p.id === formData.plan)?.nombre}
-                    </div>
-                    <div>
-                      <span className="font-medium">Moneda:</span> {formData.monedaDefault}
-                    </div>
-                    <div>
-                      <span className="font-medium">Tasa de Interés:</span> {formData.tasaInteresDefault}%
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-between">
-                  <Button variant="outline" onClick={anterior}>
-                    Anterior
-                  </Button>
-                  <Button type="submit" disabled={isLoading} className="px-8">
-                    {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Crear Empresa
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </form>
-      </div>
+      {/* Alertas */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
+            Alertas Importantes
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center space-x-3">
+                <div className="w-2 h-2 bg-red-500 rounded-full" />
+                <span className="text-red-800">5 préstamos vencidos requieren atención</span>
+              </div>
+              <Link href="/dashboard/prestamos?filtro=vencidos">
+                <Button variant="outline" size="sm" className="text-red-600 border-red-300">
+                  Ver detalles
+                </Button>
+              </Link>
+            </div>
+            
+            <div className="flex items-center justify-between p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center space-x-3">
+                <div className="w-2 h-2 bg-yellow-500 rounded-full" />
+                <span className="text-yellow-800">Plan Premium vence en 15 días</span>
+              </div>
+              <Link href="/dashboard/configuracion/plan">
+                <Button variant="outline" size="sm" className="text-yellow-600 border-yellow-300">
+                  Renovar
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

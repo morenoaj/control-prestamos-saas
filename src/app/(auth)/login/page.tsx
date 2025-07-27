@@ -1,4 +1,4 @@
-// src/app/(auth)/login/page.tsx
+// src/app/(auth)/login/page.tsx - SOLUCIÓN SIMPLE
 'use client'
 
 import { useState } from 'react'
@@ -44,13 +44,23 @@ export default function LoginPage() {
     
     try {
       await signIn(data.email, data.password)
+      
       toast({
         title: "Bienvenido",
         description: "Has iniciado sesión correctamente",
       })
+
+      // Redirigir directamente al dashboard
+      // El dashboard layout se encargará de redirigir al onboarding si es necesario
       router.push('/dashboard')
+      
     } catch (error: any) {
       setError(error.message || 'Error al iniciar sesión')
+      toast({
+        title: "Error",
+        description: error.message || 'Error al iniciar sesión',
+        variant: "destructive"
+      })
     } finally {
       setIsLoading(false)
     }
@@ -62,13 +72,22 @@ export default function LoginPage() {
     
     try {
       await signInWithGoogle()
+      
       toast({
         title: "Bienvenido",
         description: "Has iniciado sesión con Google correctamente",
       })
+
+      // Redirigir directamente al dashboard
       router.push('/dashboard')
+      
     } catch (error: any) {
       setError(error.message || 'Error al iniciar sesión con Google')
+      toast({
+        title: "Error",
+        description: error.message || 'Error al iniciar sesión con Google',
+        variant: "destructive"
+      })
     } finally {
       setIsLoading(false)
     }
