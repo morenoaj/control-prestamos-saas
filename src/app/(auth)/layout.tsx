@@ -1,4 +1,4 @@
-// src/app/(auth)/layout.tsx - VERSIÓN MÍNIMA SIN LOOPS
+// src/app/(auth)/layout.tsx - CON RUTA CORREGIDA
 'use client'
 
 import { useEffect, useRef } from 'react'
@@ -25,10 +25,10 @@ export default function AuthLayout({
       redirected.current = true
       
       if (necesitaOnboarding()) {
-        console.log('➡️ Redirigiendo a onboarding')
-        router.replace('/dashboard/onboarding')
+        console.log('➡️ Redirigiendo a onboarding desde AuthLayout')
+        router.replace('/dashboard/onboarding')  // ← Aquí corregí la ruta
       } else {
-        console.log('➡️ Redirigiendo a dashboard')
+        console.log('➡️ Redirigiendo a dashboard desde AuthLayout')
         router.replace('/dashboard')
       }
     }

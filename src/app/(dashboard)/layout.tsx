@@ -1,8 +1,8 @@
-// src/app/(dashboard)/layout.tsx - VERSIÓN MÍNIMA SIN LOOPS
+// src/app/(dashboard)/layout.tsx - VERSIÓN SIMPLIFICADA
 'use client'
 
-import { useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { DashboardSidebar } from '@/components/layout/DashboardSidebar'
 import { DashboardHeader } from '@/components/layout/DashboardHeader'
@@ -15,32 +15,40 @@ export default function DashboardLayout({
 }) {
   const { user, loading, empresaActual, necesitaOnboarding } = useAuth()
   const router = useRouter()
-  const redirected = useRef(false)
+  const pathname = usePathname()
 
   useEffect(() => {
-    if (loading || redirected.current) return
+    // No hacer nada mientras está cargando
+    if (loading) return
 
     // Si no hay usuario, redirigir a login
     if (!user) {
-      console.log('❌ No hay usuario - redirigiendo a login')
-      redirected.current = true
+      console.log('❌ No hay usuario en DashboardLayout - redirigiendo a login')
       router.replace('/login')
       return
     }
 
-    // Si necesita onboarding
+    console.log('🔍 DashboardLayout - Estado:', {
+      pathname,
+      user: user.email,
+      necesitaOnboarding: necesitaOnboarding(),
+      empresaActual: empresaActual?.nombre
+    })
+
+    // Si está en onboarding, no hacer nada (permitir que se muestre)
+    if (pathname.includes('/dashboard/onboarding')) {
+      console.log('✅ Usuario en página de onboarding - permitiendo acceso')
+      return
+    }
+
+    // Si necesita onboarding y NO está en onboarding, redirigir
     if (necesitaOnboarding()) {
-      console.log('⚠️ Usuario necesita onboarding - redirigiendo')
-      redirected.current = true
+      console.log('⚠️ Usuario necesita onboarding - redirigiendo desde DashboardLayout')
       router.replace('/dashboard/onboarding')
       return
     }
-  }, [user, loading, necesitaOnboarding, router])
 
-  // Reset redirect flag when user changes
-  useEffect(() => {
-    redirected.current = false
-  }, [user?.uid])
+  }, [user, loading, necesitaOnboarding, router, pathname])
 
   // Mostrar loading mientras carga
   if (loading) {
@@ -66,13 +74,20 @@ export default function DashboardLayout({
     )
   }
 
-  // Si necesita onboarding
+  // Si está en onboarding, mostrar sin sidebar/header
+  if (pathname.includes('/dashboard/onboarding')) {
+    console.log('📋 Mostrando página de onboarding sin layout completo')
+    return <>{children}</>
+  }
+
+  // Si necesita onboarding pero no está en onboarding, mostrar loading
   if (necesitaOnboarding()) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center space-y-4">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
           <p className="text-gray-600">Configurando tu empresa...</p>
+          <p className="text-sm text-gray-500">Redirigiendo a configuración...</p>
         </div>
       </div>
     )
@@ -91,6 +106,7 @@ export default function DashboardLayout({
   }
 
   // Todo listo - mostrar dashboard completo
+  console.log('✅ Mostrando dashboard completo con sidebar y header')
   return (
     <div className="min-h-screen bg-gray-50">
       <DashboardSidebar />
