@@ -1,7 +1,7 @@
-// src/app/(auth)/layout.tsx - LAYOUT CON REDIRECCIÓN A ONBOARDING
+// src/app/(auth)/layout.tsx - VERSIÓN MÍNIMA SIN LOOPS
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { Loader2 } from 'lucide-react'
@@ -11,43 +11,35 @@ export default function AuthLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { user, empresaActual, necesitaOnboarding, loading } = useAuth()
+  const { user, loading, necesitaOnboarding } = useAuth()
   const router = useRouter()
-  const [hasRedirected, setHasRedirected] = useState(false)
+  const redirected = useRef(false)
 
   useEffect(() => {
-    // Solo redirigir si ya terminó de cargar, hay usuario y no ha redirigido aún
-    if (!loading && user && !hasRedirected) {
-      console.log('🔄 Usuario logueado en auth layout, verificando redirección...', {
-        necesitaOnboarding: necesitaOnboarding(),
-        empresaActual: !!empresaActual
-      })
-      
-      setHasRedirected(true)
+    // No hacer nada mientras está cargando o ya redirigió
+    if (loading || redirected.current) return
+
+    // Si hay usuario logueado, redirigir según su estado
+    if (user) {
+      console.log('🔄 Usuario logueado en AuthLayout, redirigiendo...')
+      redirected.current = true
       
       if (necesitaOnboarding()) {
-        console.log('➡️ Redirigiendo a onboarding desde auth layout')
+        console.log('➡️ Redirigiendo a onboarding')
         router.replace('/dashboard/onboarding')
-      } else if (empresaActual) {
-        console.log('➡️ Redirigiendo a dashboard desde auth layout')
-        router.replace('/dashboard')
       } else {
-        // Dar un poco más de tiempo para que se carguen los datos
-        console.log('⏳ Esperando datos de empresa...')
-        setTimeout(() => {
-          if (necesitaOnboarding()) {
-            console.log('➡️ Timeout: Redirigiendo a onboarding')
-            router.replace('/dashboard/onboarding')
-          } else {
-            console.log('➡️ Timeout: Redirigiendo a dashboard')
-            router.replace('/dashboard')
-          }
-        }, 1000) // Reducido de 1500 a 1000ms
+        console.log('➡️ Redirigiendo a dashboard')
+        router.replace('/dashboard')
       }
     }
-  }, [user, empresaActual, necesitaOnboarding, router, loading, hasRedirected])
+  }, [user, loading, necesitaOnboarding, router])
 
-  // Mostrar loading mientras verifica autenticación
+  // Reset redirect flag when user changes
+  useEffect(() => {
+    redirected.current = false
+  }, [user?.uid])
+
+  // Mostrar loading mientras verifica
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
@@ -59,29 +51,18 @@ export default function AuthLayout({
     )
   }
 
-  // Si hay usuario y está redirigiendo, mostrar loading específico
-  if (user && hasRedirected) {
+  // Si hay usuario, mostrar loading específico mientras redirige
+  if (user && redirected.current) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
         <div className="text-center space-y-4">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-          <p className="text-gray-600">
-            {necesitaOnboarding() 
-              ? 'Configurando tu empresa...' 
-              : 'Accediendo al dashboard...'
-            }
-          </p>
-          <div className="text-sm text-gray-500">
-            {necesitaOnboarding() 
-              ? 'Te llevaremos al formulario de onboarding' 
-              : 'Ya tienes sesión activa'
-            }
-          </div>
+          <p className="text-gray-600">Redirigiendo...</p>
         </div>
       </div>
     )
   }
 
-  // Si no hay usuario o no ha redirigido aún, mostrar las páginas de auth normalmente
+  // Si no hay usuario, mostrar las páginas de auth
   return <>{children}</>
 }

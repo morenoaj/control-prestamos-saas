@@ -1,7 +1,7 @@
-// src/context/AuthContext.tsx - CORRIGIENDO FLUJO DE ONBOARDING
+// src/context/AuthContext.tsx - VERSIÓN SIN LOOPS INFINITOS
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { 
   User,
   signInWithEmailAndPassword,
@@ -65,36 +65,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [rolActual, setRolActual] = useState<UsuarioEmpresa['rol'] | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // Usar useRef para evitar múltiples listeners
-  const listenerInitialized = useRef(false);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
+  // Refs para evitar re-renders y loops
+  const authListenerSetup = useRef(false);
+  const loadingUserData = useRef(false);
 
   // Helper para verificar si el usuario necesita onboarding
-  const necesitaOnboarding = () => {
-    const result = !!(user && usuario && (!usuario.empresas || usuario.empresas.length === 0));
-    console.log('🔍 necesitaOnboarding:', {
-      user: !!user,
-      usuario: !!usuario,
-      empresasCount: usuario?.empresas?.length || 0,
-      result
-    });
-    return result;
-  };
-
-  useEffect(() => {
-    // Solo configurar el listener una vez
-    if (listenerInitialized.current) {
-      return;
-    }
+  const necesitaOnboarding = useCallback(() => {
+    if (!user || !usuario) return false;
     
-    console.log('🔄 Configurando listener de autenticación... (ÚNICA VEZ)');
-    listenerInitialized.current = true;
+    const hasEmpresas = usuario.empresas && usuario.empresas.length > 0;
+    return !hasEmpresas;
+  }, [user, usuario]);
+
+  // Setup del listener de autenticación (solo una vez)
+  useEffect(() => {
+    if (authListenerSetup.current) return;
+    
+    console.log('🔄 Configurando listener de autenticación...');
+    authListenerSetup.current = true;
     
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log('🔄 Estado de autenticación cambió:', firebaseUser ? `Usuario: ${firebaseUser.email}` : 'Usuario no logueado');
+      // Evitar procesar si ya estamos cargando datos
+      if (loadingUserData.current) return;
+      
+      console.log('🔄 Auth state changed:', firebaseUser ? `Usuario: ${firebaseUser.email}` : 'No hay usuario');
       
       try {
         if (firebaseUser) {
+          loadingUserData.current = true;
+          
           const authUser: AuthUser = {
             uid: firebaseUser.uid,
             email: firebaseUser.email,
@@ -103,102 +102,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             emailVerified: firebaseUser.emailVerified
           };
           
-          console.log('✅ Usuario autenticado:', authUser.email);
           setUser(authUser);
           await cargarDatosUsuario(firebaseUser);
         } else {
-          console.log('❌ Usuario no autenticado - limpiando estado');
           limpiarEstado();
         }
       } catch (error) {
-        console.error('❌ Error en onAuthStateChanged:', error);
+        console.error('❌ Error en auth state change:', error);
         limpiarEstado();
       } finally {
+        loadingUserData.current = false;
         setLoading(false);
       }
     });
 
-    // Guardar la función de limpieza
-    unsubscribeRef.current = unsubscribe;
-
-    // Cleanup function
     return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-      }
-      listenerInitialized.current = false;
+      unsubscribe();
+      authListenerSetup.current = false;
     };
-  }, []); // Array de dependencias vacío para que solo se ejecute una vez
+  }, []); // Array vacío - solo se ejecuta una vez
 
-  const limpiarEstado = () => {
+  const limpiarEstado = useCallback(() => {
     setUser(null);
     setUsuario(null);
     setEmpresaActual(null);
     setEmpresas([]);
     setRolActual(null);
-    // Limpiar localStorage
     if (typeof window !== 'undefined') {
       localStorage.removeItem('empresaActual');
     }
-  };
+  }, []);
 
-  const cargarDatosUsuario = async (firebaseUser: User, retries = 2) => {
+  const cargarDatosUsuario = async (firebaseUser: User) => {
     try {
       console.log('📂 Cargando datos del usuario:', firebaseUser.uid);
       
-      // Cargar datos del usuario
       const usuarioDoc = await getDoc(doc(db, 'usuarios', firebaseUser.uid));
       
       if (usuarioDoc.exists()) {
         const userData = { id: usuarioDoc.id, ...usuarioDoc.data() } as Usuario;
-        console.log('✅ Datos de usuario cargados:', userData.nombre);
+        console.log('✅ Usuario encontrado:', userData.nombre);
         console.log('📊 Empresas del usuario:', userData.empresas?.length || 0);
+        
         setUsuario(userData);
         
-        // Solo cargar empresas si las tiene
+        // Solo cargar empresas si tiene
         if (userData.empresas && userData.empresas.length > 0) {
-          console.log('🏢 Usuario tiene empresas, cargándolas...');
           await cargarEmpresasUsuario(userData);
         } else {
-          console.log('⚠️ Usuario sin empresas - necesitará onboarding');
+          console.log('⚠️ Usuario sin empresas - necesita onboarding');
           setEmpresas([]);
           setEmpresaActual(null);
           setRolActual(null);
         }
       } else {
-        console.log('❌ Documento de usuario no encontrado - creando nuevo usuario...');
+        console.log('❌ Usuario no encontrado - creando...');
         await crearUsuarioEnFirestore(firebaseUser);
       }
     } catch (error: any) {
       console.error('❌ Error cargando datos del usuario:', error);
-      
-      // Reintentar si es un error de conectividad y tenemos intentos restantes
-      if (retries > 0 && (
-        error.code === 'unavailable' || 
-        error.message?.includes('offline') ||
-        error.message?.includes('network')
-      )) {
-        console.log(`🔄 Reintentando carga de datos... (${retries} intentos restantes)`);
-        setTimeout(() => cargarDatosUsuario(firebaseUser, retries - 1), 2000);
-        return;
-      }
-      
-      // Si falla después de reintentos, crear usuario básico
-      console.log('🔧 Creando usuario básico después de error');
       await crearUsuarioEnFirestore(firebaseUser);
     }
   };
 
   const crearUsuarioEnFirestore = async (firebaseUser: User) => {
     try {
-      console.log('📝 Creando documento de usuario en Firestore...');
+      console.log('📝 Creando usuario en Firestore...');
       
       const nuevoUsuario: Omit<Usuario, 'id'> = {
         email: firebaseUser.email || '',
         nombre: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
         fechaRegistro: serverTimestamp() as any,
-        empresas: [], // ← Importante: array vacío para nuevo usuario
+        empresas: [], // Sin empresas inicialmente
         configuracion: {
           idioma: 'es',
           tema: 'light',
@@ -209,87 +184,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await setDoc(doc(db, 'usuarios', firebaseUser.uid), nuevoUsuario);
       console.log('✅ Usuario creado en Firestore');
       
-      // Asignar datos localmente
       const usuarioConId = { id: firebaseUser.uid, ...nuevoUsuario };
       setUsuario(usuarioConId);
-      
-      // Sin empresas, así que limpiar estado de empresa
       setEmpresas([]);
       setEmpresaActual(null);
       setRolActual(null);
       
-      console.log('✅ Usuario sin empresas - necesita onboarding');
-      
     } catch (error) {
       console.error('❌ Error creando usuario en Firestore:', error);
-      // No lanzar error, solo loggear para evitar loops
       setUsuario(null);
     }
   };
 
   const cargarEmpresasUsuario = async (userData: Usuario) => {
     try {
-      if (userData.empresas && userData.empresas.length > 0) {
-        console.log('🏢 Cargando empresas del usuario...');
-        const empresasIds = userData.empresas.map(e => e.empresaId);
+      if (!userData.empresas || userData.empresas.length === 0) {
+        setEmpresas([]);
+        setEmpresaActual(null);
+        setRolActual(null);
+        return;
+      }
+
+      console.log('🏢 Cargando empresas del usuario...');
+      const empresasIds = userData.empresas.map(e => e.empresaId);
+      
+      const empresasData: Empresa[] = [];
+      
+      // Cargar empresas en lotes
+      const batchSize = 10;
+      for (let i = 0; i < empresasIds.length; i += batchSize) {
+        const batch = empresasIds.slice(i, i + batchSize);
+        const empresasQuery = query(
+          collection(db, 'empresas'),
+          where('__name__', 'in', batch)
+        );
+        const empresasSnapshot = await getDocs(empresasQuery);
+        const batchData = empresasSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Empresa[];
         
-        // Cargar empresas en lotes de 10
-        const empresasData: Empresa[] = [];
-        const batchSize = 10;
-        
-        for (let i = 0; i < empresasIds.length; i += batchSize) {
-          const batch = empresasIds.slice(i, i + batchSize);
-          const empresasQuery = query(
-            collection(db, 'empresas'),
-            where('__name__', 'in', batch)
-          );
-          const empresasSnapshot = await getDocs(empresasQuery);
-          const batchData = empresasSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Empresa[];
-          
-          empresasData.push(...batchData);
+        empresasData.push(...batchData);
+      }
+
+      console.log('✅ Empresas cargadas:', empresasData.length);
+      setEmpresas(empresasData);
+
+      // Establecer empresa actual
+      let empresaActiva: Empresa | undefined;
+      
+      // Intentar desde localStorage
+      if (typeof window !== 'undefined') {
+        const empresaGuardada = localStorage.getItem('empresaActual');
+        if (empresaGuardada) {
+          empresaActiva = empresasData.find(e => e.id === empresaGuardada);
         }
+      }
+      
+      // Si no hay en localStorage, tomar la primera activa
+      if (!empresaActiva) {
+        empresaActiva = empresasData.find(e => e.estado === 'activa') || empresasData[0];
+      }
 
-        console.log('✅ Empresas cargadas:', empresasData.length);
-        setEmpresas(empresasData);
-
-        // Establecer empresa actual
-        let empresaActiva: Empresa | undefined;
+      if (empresaActiva) {
+        setEmpresaActual(empresaActiva);
         
-        // Primero intentar desde localStorage
+        const rolEmpresa = userData.empresas.find(e => e.empresaId === empresaActiva!.id);
+        setRolActual(rolEmpresa?.rol || null);
+
         if (typeof window !== 'undefined') {
-          const empresaGuardada = localStorage.getItem('empresaActual');
-          if (empresaGuardada) {
-            empresaActiva = empresasData.find(e => e.id === empresaGuardada);
-            console.log('🏢 Empresa desde localStorage:', empresaActiva?.nombre);
-          }
+          localStorage.setItem('empresaActual', empresaActiva.id);
         }
         
-        // Si no hay en localStorage, tomar la primera activa
-        if (!empresaActiva) {
-          empresaActiva = empresasData.find(e => e.estado === 'activa') || empresasData[0];
-          console.log('🏢 Empresa seleccionada automáticamente:', empresaActiva?.nombre);
-        }
-
-        if (empresaActiva) {
-          setEmpresaActual(empresaActiva);
-          
-          // Establecer rol actual
-          const rolEmpresa = userData.empresas.find(e => e.empresaId === empresaActiva!.id);
-          setRolActual(rolEmpresa?.rol || null);
-          console.log('👤 Rol establecido:', rolEmpresa?.rol);
-
-          // Guardar en localStorage
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('empresaActual', empresaActiva.id);
-          }
-        }
+        console.log('✅ Empresa actual establecida:', empresaActiva.nombre);
       }
     } catch (error) {
       console.error('❌ Error cargando empresas:', error);
-      // No lanzar error, solo loggear
       setEmpresas([]);
       setEmpresaActual(null);
       setRolActual(null);
@@ -312,14 +282,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('📝 Registrando usuario:', email);
       const { user: firebaseUser } = await createUserWithEmailAndPassword(auth, email, password);
       
-      // Actualizar perfil en Firebase Auth
       await updateProfile(firebaseUser, {
         displayName: nombre
       });
 
       console.log('✅ Usuario registrado exitosamente');
-
-      // Enviar email de verificación
       await sendEmailVerification(firebaseUser);
       
       toast({
@@ -337,8 +304,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       console.log('🔑 Iniciando sesión con Google...');
       const provider = new GoogleAuthProvider();
-      const { user: firebaseUser } = await signInWithPopup(auth, provider);
-
+      await signInWithPopup(auth, provider);
       console.log('✅ Sesión con Google iniciada exitosamente');
     } catch (error: any) {
       console.error('❌ Error en signInWithGoogle:', error);
@@ -373,24 +339,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const cambiarEmpresa = async (empresaId: string) => {
+  const cambiarEmpresa = useCallback(async (empresaId: string) => {
     const empresa = empresas.find(e => e.id === empresaId);
     if (empresa && usuario) {
       console.log('🔄 Cambiando a empresa:', empresa.nombre);
       setEmpresaActual(empresa);
       
-      // Actualizar rol
       const rolEmpresa = usuario.empresas.find(e => e.empresaId === empresaId);
       setRolActual(rolEmpresa?.rol || null);
       
-      // Persistir en localStorage
       if (typeof window !== 'undefined') {
         localStorage.setItem('empresaActual', empresaId);
       }
     }
-  };
+  }, [empresas, usuario]);
 
-  const actualizarPerfil = async (data: Partial<Usuario>) => {
+  const actualizarPerfil = useCallback(async (data: Partial<Usuario>) => {
     if (!user || !usuario) return;
 
     try {
@@ -398,7 +362,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await setDoc(doc(db, 'usuarios', user.uid), datosActualizados);
       setUsuario(datosActualizados);
 
-      // Actualizar Firebase Auth si es necesario
       if (data.nombre && auth.currentUser) {
         await updateProfile(auth.currentUser, {
           displayName: data.nombre
@@ -413,33 +376,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('❌ Error actualizando perfil:', error);
       throw new Error('Error al actualizar el perfil');
     }
-  };
+  }, [user, usuario]);
 
-  const reloadUser = async () => {
-    if (user && auth.currentUser) {
+  const reloadUser = useCallback(async () => {
+    if (user && auth.currentUser && !loadingUserData.current) {
       console.log('🔄 Recargando datos del usuario...');
-      await cargarDatosUsuario(auth.currentUser);
+      loadingUserData.current = true;
+      try {
+        await cargarDatosUsuario(auth.currentUser);
+      } finally {
+        loadingUserData.current = false;
+      }
     }
-  };
-
-  // Debug: Solo en desarrollo y con throttling
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      const timeout = setTimeout(() => {
-        console.log('🔍 Estado actual:', {
-          user: user?.email,
-          usuario: usuario?.nombre,
-          empresaActual: empresaActual?.nombre,
-          empresasCount: empresas.length,
-          loading,
-          necesitaOnboarding: necesitaOnboarding(),
-          listenerInitialized: listenerInitialized.current
-        });
-      }, 100); // Throttle para evitar spam
-
-      return () => clearTimeout(timeout);
-    }
-  }, [user, usuario, empresaActual, empresas.length, loading]);
+  }, [user]);
 
   const value = {
     user,
@@ -466,7 +415,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Función helper para mensajes de error más amigables
 function getAuthErrorMessage(errorCode: string): string {
   switch (errorCode) {
     case 'auth/user-not-found':
