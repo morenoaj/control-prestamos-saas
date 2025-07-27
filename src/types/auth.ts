@@ -1,4 +1,6 @@
 // src/types/auth.ts
+import { Empresa, UsuarioEmpresa } from './database';
+
 export interface AuthUser {
   uid: string;
   email: string | null;
@@ -13,7 +15,6 @@ export interface UserSession {
   rol: UsuarioEmpresa['rol'];
 }
 
-// src/types/api.ts
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;

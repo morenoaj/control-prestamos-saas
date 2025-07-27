@@ -1,9 +1,16 @@
 // src/lib/firebase.ts
-import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { getStorage, connectStorageEmulator } from 'firebase/storage';
+import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
+import { getAuth, Auth } from 'firebase/auth';
+import { 
+  getFirestore, 
+  Firestore, 
+  connectFirestoreEmulator,
+  enableNetwork,
+  disableNetwork 
+} from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 
+// Configuración de Firebase con validación
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -13,32 +20,67 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Initialize Firebase
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+// Validar configuración
+function validateFirebaseConfig() {
+  const requiredFields = [
+    'apiKey',
+    'authDomain', 
+    'projectId',
+    'storageBucket',
+    'messagingSenderId',
+    'appId'
+  ];
 
-// Initialize Firebase services
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
-
-// Connect to emulators in development
-if (process.env.NODE_ENV === 'development') {
-  try {
-    // Solo conectar si no está ya conectado
-    if (!auth.emulatorConfig) {
-      connectAuthEmulator(auth, 'http://localhost:9099');
-    }
-    // @ts-ignore
-    if (!db._delegate._databaseId.projectId.includes('demo-')) {
-      connectFirestoreEmulator(db, 'localhost', 8080);
-    }
-    // @ts-ignore
-    if (!storage._delegate._host.includes('localhost')) {
-      connectStorageEmulator(storage, 'localhost', 9199);
-    }
-  } catch (error) {
-    console.log('Emulators already connected or not available');
+  const missing = requiredFields.filter(field => !firebaseConfig[field as keyof typeof firebaseConfig]);
+  
+  if (missing.length > 0) {
+    console.error('❌ Firebase config missing:', missing);
+    throw new Error(`Firebase configuration missing: ${missing.join(', ')}`);
   }
+
+  console.log('✅ Firebase config validated successfully');
 }
+
+// Validar antes de inicializar
+validateFirebaseConfig();
+
+// Initialize Firebase
+let app: FirebaseApp;
+if (getApps().length === 0) {
+  app = initializeApp(firebaseConfig);
+  console.log('🔥 Firebase initialized');
+} else {
+  app = getApps()[0];
+  console.log('🔥 Firebase already initialized');
+}
+
+// Initialize Firebase services with error handling
+export let auth: Auth;
+export let db: Firestore;
+export let storage: FirebaseStorage;
+
+try {
+  auth = getAuth(app);
+  db = getFirestore(app);
+  storage = getStorage(app);
+  
+  // Habilitar red explícitamente
+  enableNetwork(db).catch(console.warn);
+  
+  console.log('✅ Firebase services initialized');
+} catch (error) {
+  console.error('❌ Error initializing Firebase services:', error);
+  throw error;
+}
+
+// Helper para reconectar Firestore
+export const reconnectFirestore = async () => {
+  try {
+    await enableNetwork(db);
+    console.log('🔄 Firestore reconnected');
+  } catch (error) {
+    console.error('❌ Error reconnecting Firestore:', error);
+  }
+};
 
 export default app;
