@@ -1,95 +1,87 @@
-// src/app/(dashboard)/layout.tsx - CON REDIRECCIÓN FORZADA
+// src/app/(auth)/layout.tsx - LAYOUT CON REDIRECCIÓN A ONBOARDING
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
-import { DashboardSidebar } from '@/components/layout/DashboardSidebar'
-import { DashboardHeader } from '@/components/layout/DashboardHeader'
 import { Loader2 } from 'lucide-react'
 
-export default function DashboardLayout({
+export default function AuthLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const { user, loading, empresaActual, necesitaOnboarding } = useAuth()
+  const { user, empresaActual, necesitaOnboarding, loading } = useAuth()
   const router = useRouter()
+  const [hasRedirected, setHasRedirected] = useState(false)
 
   useEffect(() => {
-    console.log('🔍 [DASHBOARD LAYOUT] Estado:', {
-      loading,
-      user: user?.email,
-      empresaActual: empresaActual?.nombre,
-      necesitaOnboarding: necesitaOnboarding()
-    })
-
-    if (!loading) {
-      if (!user) {
-        console.log('❌ [DASHBOARD] Sin usuario - redirigiendo a login')
-        window.location.href = '/login'
-      } else if (necesitaOnboarding()) {
-        console.log('🚀 [DASHBOARD] Necesita onboarding - redirigiendo')
-        window.location.href = '/dashboard/onboarding'
-      } else if (!empresaActual) {
-        console.log('⏳ [DASHBOARD] Sin empresa - redirigiendo a onboarding')
-        window.location.href = '/dashboard/onboarding'
+    // Solo redirigir si ya terminó de cargar, hay usuario y no ha redirigido aún
+    if (!loading && user && !hasRedirected) {
+      console.log('🔄 Usuario logueado en auth layout, verificando redirección...', {
+        necesitaOnboarding: necesitaOnboarding(),
+        empresaActual: !!empresaActual
+      })
+      
+      setHasRedirected(true)
+      
+      if (necesitaOnboarding()) {
+        console.log('➡️ Redirigiendo a onboarding desde auth layout')
+        router.replace('/dashboard/onboarding')
+      } else if (empresaActual) {
+        console.log('➡️ Redirigiendo a dashboard desde auth layout')
+        router.replace('/dashboard')
       } else {
-        console.log('✅ [DASHBOARD] Todo listo - mostrando dashboard')
+        // Dar un poco más de tiempo para que se carguen los datos
+        console.log('⏳ Esperando datos de empresa...')
+        setTimeout(() => {
+          if (necesitaOnboarding()) {
+            console.log('➡️ Timeout: Redirigiendo a onboarding')
+            router.replace('/dashboard/onboarding')
+          } else {
+            console.log('➡️ Timeout: Redirigiendo a dashboard')
+            router.replace('/dashboard')
+          }
+        }, 1000) // Reducido de 1500 a 1000ms
       }
     }
-  }, [user, loading, empresaActual, necesitaOnboarding, router])
+  }, [user, empresaActual, necesitaOnboarding, router, loading, hasRedirected])
 
+  // Mostrar loading mientras verifica autenticación
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
         <div className="text-center space-y-4">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-          <p className="text-gray-600">Cargando tu dashboard...</p>
+          <p className="text-gray-600">Verificando sesión...</p>
         </div>
       </div>
     )
   }
 
-  if (!user) {
+  // Si hay usuario y está redirigiendo, mostrar loading específico
+  if (user && hasRedirected) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
         <div className="text-center space-y-4">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-          <p className="text-gray-600">Redirigiendo al login...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (necesitaOnboarding() || !empresaActual) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-          <p className="text-gray-600">Redirigiendo al onboarding...</p>
-          <button 
-            onClick={() => window.location.href = '/dashboard/onboarding'}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Ir a Onboarding
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <DashboardSidebar />
-      <div className="lg:pl-64">
-        <DashboardHeader />
-        <main className="py-6">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            {children}
+          <p className="text-gray-600">
+            {necesitaOnboarding() 
+              ? 'Configurando tu empresa...' 
+              : 'Accediendo al dashboard...'
+            }
+          </p>
+          <div className="text-sm text-gray-500">
+            {necesitaOnboarding() 
+              ? 'Te llevaremos al formulario de onboarding' 
+              : 'Ya tienes sesión activa'
+            }
           </div>
-        </main>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
+
+  // Si no hay usuario o no ha redirigido aún, mostrar las páginas de auth normalmente
+  return <>{children}</>
 }

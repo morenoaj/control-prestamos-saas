@@ -1,4 +1,4 @@
-// src/app/onboarding/page.tsx - PÁGINA SIMPLE SIN LAYOUT DASHBOARD
+// src/app/onboarding/page.tsx - CON SELECTOR DE PLANES
 'use client'
 
 import { useState } from 'react'
@@ -13,19 +13,97 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useAuth } from '@/context/AuthContext'
 import { useCompany } from '@/context/CompanyContext'
 import { toast } from '@/hooks/use-toast'
-import { Building2, Loader2 } from 'lucide-react'
+import { 
+  Building2, 
+  Loader2, 
+  CheckCircle, 
+  Star, 
+  Users, 
+  CreditCard, 
+  BarChart3,
+  Zap,
+  Crown,
+  Rocket
+} from 'lucide-react'
 
 const empresaSchema = z.object({
   nombre: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
   email: z.string().email('Email inválido'),
   telefono: z.string().min(10, 'Teléfono debe tener al menos 10 dígitos'),
   direccion: z.string().min(5, 'La dirección debe tener al menos 5 caracteres'),
+  plan: z.enum(['basico', 'premium', 'enterprise'], {
+    error: 'Debes seleccionar un plan'
+  })
 })
 
 type EmpresaFormData = z.infer<typeof empresaSchema>
 
+const planes = [
+  {
+    id: 'basico',
+    nombre: 'Básico',
+    precio: 29,
+    descripcion: 'Perfecto para emprendedores',
+    icon: Users,
+    color: 'from-green-500 to-green-600',
+    bgColor: 'bg-green-50',
+    borderColor: 'border-green-200',
+    textColor: 'text-green-700',
+    caracteristicas: [
+      'Hasta 100 clientes',
+      'Hasta 500 préstamos',
+      'Reportes básicos',
+      'Soporte por email',
+      '1 empresa'
+    ],
+    popular: false
+  },
+  {
+    id: 'premium',
+    nombre: 'Premium',
+    precio: 79,
+    descripcion: 'Para pequeñas empresas',
+    icon: Star,
+    color: 'from-blue-500 to-blue-600',
+    bgColor: 'bg-blue-50',
+    borderColor: 'border-blue-500',
+    textColor: 'text-blue-700',
+    caracteristicas: [
+      'Hasta 1,000 clientes',
+      'Préstamos ilimitados',
+      'Reportes avanzados',
+      'Notificaciones automáticas',
+      'Soporte prioritario',
+      'Hasta 3 empresas'
+    ],
+    popular: true
+  },
+  {
+    id: 'enterprise',
+    nombre: 'Enterprise',
+    precio: 199,
+    descripcion: 'Para grandes empresas',
+    icon: Crown,
+    color: 'from-purple-500 to-purple-600',
+    bgColor: 'bg-purple-50',
+    borderColor: 'border-purple-200',
+    textColor: 'text-purple-700',
+    caracteristicas: [
+      'Clientes ilimitados',
+      'Empresas ilimitadas',
+      'API completa',
+      'Integraciones personalizadas',
+      'Soporte 24/7',
+      'Manager dedicado'
+    ],
+    popular: false
+  }
+]
+
 export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState(false)
+  const [selectedPlan, setSelectedPlan] = useState<string>('premium')
+  const [step, setStep] = useState(1) // 1: seleccionar plan, 2: datos empresa
   const router = useRouter()
   const { user, reloadUser } = useAuth()
   const { crearEmpresa } = useCompany()
@@ -34,24 +112,36 @@ export default function OnboardingPage() {
     register,
     handleSubmit,
     formState: { errors },
+    setValue,
+    watch
   } = useForm<EmpresaFormData>({
     resolver: zodResolver(empresaSchema),
     defaultValues: {
       email: user?.email || '',
+      plan: 'premium'
     }
   })
+
+  const planSeleccionado = watch('plan')
+
+  const handlePlanSelect = (planId: string) => {
+    setSelectedPlan(planId)
+    setValue('plan', planId as any)
+  }
 
   const onSubmit = async (data: EmpresaFormData) => {
     setIsLoading(true)
     
     try {
-      // Preparar datos según el tipo que espera crearEmpresa
+      const planElegido = planes.find(p => p.id === data.plan)
+      
+      // Preparar datos de la empresa
       const empresaData = {
         nombre: data.nombre,
         email: data.email,
         telefono: data.telefono,
         direccion: data.direccion,
-        plan: 'premium' as const,
+        plan: data.plan,
         estado: 'activa' as const,
         fechaVencimiento: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 días
         configuracion: {
@@ -60,16 +150,11 @@ export default function OnboardingPage() {
           diasGracia: 3,
           colorTema: '#2563eb'
         },
-        limites: {
-          maxClientes: 1000,
-          maxPrestamos: -1,
-          maxUsuarios: 5
-        }
+        limites: getLimitesPorPlan(data.plan)
       }
 
-      console.log('🏢 Creando empresa:', empresaData)
+      console.log('🏢 Creando empresa con plan:', data.plan)
       
-      // Usar any temporalmente para evitar errores de tipo
       const empresaId = await crearEmpresa(empresaData as any)
       console.log('✅ Empresa creada con ID:', empresaId)
       
@@ -77,7 +162,7 @@ export default function OnboardingPage() {
       await reloadUser()
       
       toast({
-        title: "¡Empresa creada exitosamente! 🎉",
+        title: `¡Empresa creada con plan ${planElegido?.nombre}! 🎉`,
         description: `${data.nombre} ha sido configurada correctamente`,
       })
       
@@ -98,117 +183,285 @@ export default function OnboardingPage() {
     }
   }
 
+  const getLimitesPorPlan = (plan: string) => {
+    switch (plan) {
+      case 'basico':
+        return {
+          maxClientes: 100,
+          maxPrestamos: 500,
+          maxUsuarios: 1
+        }
+      case 'premium':
+        return {
+          maxClientes: 1000,
+          maxPrestamos: -1, // ilimitado
+          maxUsuarios: 5
+        }
+      case 'enterprise':
+        return {
+          maxClientes: -1, // ilimitado
+          maxPrestamos: -1, // ilimitado
+          maxUsuarios: -1 // ilimitado
+        }
+      default:
+        return {
+          maxClientes: 100,
+          maxPrestamos: 500,
+          maxUsuarios: 1
+        }
+    }
+  }
+
+  const planActual = planes.find(p => p.id === selectedPlan)
+
+  if (step === 1) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 py-12">
+        <div className="container mx-auto px-4 max-w-6xl">
+          {/* Header */}
+          <div className="text-center mb-12">
+            <div className="flex items-center justify-center mb-6">
+              <div className="p-3 bg-blue-600 rounded-xl">
+                <Rocket className="h-8 w-8 text-white" />
+              </div>
+            </div>
+            <h1 className="text-4xl font-bold text-gray-900 mb-4">
+              ¡Bienvenido a Control de Préstamos! 🎉
+            </h1>
+            <p className="text-xl text-gray-600 mb-8">
+              Elige el plan que mejor se adapte a tu negocio
+            </p>
+          </div>
+
+          {/* Selector de Planes */}
+          <div className="grid md:grid-cols-3 gap-8 mb-12">
+            {planes.map((plan) => {
+              const Icon = plan.icon
+              const isSelected = selectedPlan === plan.id
+              
+              return (
+                <Card 
+                  key={plan.id}
+                  className={`relative cursor-pointer transition-all duration-300 transform hover:scale-105 ${
+                    isSelected 
+                      ? `${plan.borderColor} border-2 shadow-xl ring-2 ring-offset-2 ring-blue-500` 
+                      : 'border-gray-200 hover:border-gray-300 shadow-lg hover:shadow-xl'
+                  }`}
+                  onClick={() => handlePlanSelect(plan.id)}
+                >
+                  {plan.popular && (
+                    <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                      <span className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-2 rounded-full text-sm font-bold shadow-lg">
+                        🔥 MÁS POPULAR
+                      </span>
+                    </div>
+                  )}
+                  
+                  <CardHeader className="text-center pb-4">
+                    <div className={`w-16 h-16 bg-gradient-to-r ${plan.color} rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg`}>
+                      <Icon className="h-8 w-8 text-white" />
+                    </div>
+                    <CardTitle className="text-2xl font-bold mb-2">{plan.nombre}</CardTitle>
+                    <CardDescription className="text-gray-600 mb-4">{plan.descripcion}</CardDescription>
+                    <div className="text-4xl font-bold text-gray-900 mb-2">
+                      ${plan.precio}
+                      <span className="text-lg font-normal text-gray-500">/mes</span>
+                    </div>
+                  </CardHeader>
+                  
+                  <CardContent>
+                    <ul className="space-y-3 mb-6">
+                      {plan.caracteristicas.map((caracteristica, index) => (
+                        <li key={index} className="flex items-center">
+                          <CheckCircle className="h-5 w-5 text-green-500 mr-3 flex-shrink-0" />
+                          <span className="text-gray-700">{caracteristica}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    
+                    {isSelected && (
+                      <div className={`${plan.bgColor} ${plan.textColor} p-3 rounded-lg border ${plan.borderColor} text-center font-medium`}>
+                        ✓ Plan Seleccionado
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+
+          {/* Botón para continuar */}
+          <div className="text-center">
+            <Button
+              onClick={() => setStep(2)}
+              disabled={!selectedPlan}
+              className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-lg font-semibold px-10 py-4 transition-all transform hover:scale-105 shadow-lg hover:shadow-xl"
+            >
+              <Zap className="mr-2 h-5 w-5" />
+              Continuar con Plan {planActual?.nombre}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Step 2: Datos de la empresa
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 py-12">
-      <div className="container mx-auto px-4 max-w-2xl">
+      <div className="container mx-auto px-4 max-w-4xl">
         {/* Header */}
-        <div className="text-center mb-12">
+        <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-6">
             <div className="p-3 bg-blue-600 rounded-xl">
               <Building2 className="h-8 w-8 text-white" />
             </div>
           </div>
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            ¡Bienvenido a Control de Préstamos! 🎉
+          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+            Configuremos tu empresa
           </h1>
-          <p className="text-xl text-gray-600">
-            Configuremos tu empresa para comenzar
+          <p className="text-lg text-gray-600">
+            Cuéntanos sobre tu empresa para personalizar la experiencia
           </p>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center text-2xl">
-              <Building2 className="mr-3 h-7 w-7 text-blue-600" />
-              Información de tu Empresa
-            </CardTitle>
-            <CardDescription>
-              Cuéntanos sobre tu empresa para personalizar la experiencia
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-              <div className="grid md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="nombre">Nombre de la Empresa *</Label>
-                  <Input
-                    id="nombre"
-                    placeholder="Mi Empresa de Préstamos"
-                    {...register('nombre')}
-                    className={errors.nombre ? 'border-red-500' : ''}
-                  />
-                  {errors.nombre && (
-                    <p className="text-sm text-red-500">{errors.nombre.message}</p>
-                  )}
-                </div>
+        <div className="grid lg:grid-cols-3 gap-8">
+          {/* Formulario */}
+          <div className="lg:col-span-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center text-2xl">
+                  <Building2 className="mr-3 h-7 w-7 text-blue-600" />
+                  Información de tu Empresa
+                </CardTitle>
+                <CardDescription>
+                  Completa los datos para finalizar la configuración
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-6">
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="nombre">Nombre de la Empresa *</Label>
+                      <Input
+                        id="nombre"
+                        placeholder="Mi Empresa de Préstamos"
+                        {...register('nombre')}
+                        className={errors.nombre ? 'border-red-500' : ''}
+                      />
+                      {errors.nombre && (
+                        <p className="text-sm text-red-500">{errors.nombre.message}</p>
+                      )}
+                    </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email Empresarial *</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="contacto@miempresa.com"
-                    {...register('email')}
-                    className={errors.email ? 'border-red-500' : ''}
-                  />
-                  {errors.email && (
-                    <p className="text-sm text-red-500">{errors.email.message}</p>
-                  )}
-                </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Email Empresarial *</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="contacto@miempresa.com"
+                        {...register('email')}
+                        className={errors.email ? 'border-red-500' : ''}
+                      />
+                      {errors.email && (
+                        <p className="text-sm text-red-500">{errors.email.message}</p>
+                      )}
+                    </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="telefono">Teléfono *</Label>
-                  <Input
-                    id="telefono"
-                    placeholder="+507 6000-0000"
-                    {...register('telefono')}
-                    className={errors.telefono ? 'border-red-500' : ''}
-                  />
-                  {errors.telefono && (
-                    <p className="text-sm text-red-500">{errors.telefono.message}</p>
-                  )}
-                </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="telefono">Teléfono *</Label>
+                      <Input
+                        id="telefono"
+                        placeholder="+507 6000-0000"
+                        {...register('telefono')}
+                        className={errors.telefono ? 'border-red-500' : ''}
+                      />
+                      {errors.telefono && (
+                        <p className="text-sm text-red-500">{errors.telefono.message}</p>
+                      )}
+                    </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="direccion">Dirección *</Label>
-                  <Input
-                    id="direccion"
-                    placeholder="Calle Principal, Ciudad, País"
-                    {...register('direccion')}
-                    className={errors.direccion ? 'border-red-500' : ''}
-                  />
-                  {errors.direccion && (
-                    <p className="text-sm text-red-500">{errors.direccion.message}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Plan seleccionado automáticamente */}
-              <div className="bg-blue-50 rounded-lg p-6">
-                <h3 className="font-semibold text-blue-900 mb-4">📋 Plan Seleccionado</h3>
-                <div className="grid md:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="font-medium">Plan:</span> Premium
+                    <div className="space-y-2">
+                      <Label htmlFor="direccion">Dirección *</Label>
+                      <Input
+                        id="direccion"
+                        placeholder="Calle Principal, Ciudad, País"
+                        {...register('direccion')}
+                        className={errors.direccion ? 'border-red-500' : ''}
+                      />
+                      {errors.direccion && (
+                        <p className="text-sm text-red-500">{errors.direccion.message}</p>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <span className="font-medium">Precio:</span> $79/mes
-                  </div>
-                  <div>
-                    <span className="font-medium">Clientes:</span> Hasta 1,000
-                  </div>
-                  <div>
-                    <span className="font-medium">Préstamos:</span> Ilimitados
+
+                  <div className="flex gap-4">
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => setStep(1)}
+                      className="flex-1"
+                    >
+                      Volver a Planes
+                    </Button>
+                    <Button 
+                      onClick={handleSubmit(onSubmit)}
+                      disabled={isLoading} 
+                      className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
+                    >
+                      {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Crear Empresa
+                    </Button>
                   </div>
                 </div>
-              </div>
+              </CardContent>
+            </Card>
+          </div>
 
-              <Button type="submit" disabled={isLoading} className="w-full py-3">
-                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Crear Empresa y Comenzar
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+          {/* Resumen del Plan */}
+          <div className="lg:col-span-1">
+            <Card className="sticky top-8">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  {planActual && <planActual.icon className="mr-2 h-5 w-5 text-blue-600" />}
+                  Plan {planActual?.nombre}
+                </CardTitle>
+                <CardDescription>Resumen de tu selección</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-gray-900">
+                      ${planActual?.precio}
+                      <span className="text-lg font-normal text-gray-500">/mes</span>
+                    </div>
+                    <p className="text-sm text-gray-600">+ impuestos</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h4 className="font-semibold text-gray-900">Incluye:</h4>
+                    {planActual?.caracteristicas.map((caracteristica, index) => (
+                      <div key={index} className="flex items-center text-sm">
+                        <CheckCircle className="h-4 w-4 text-green-500 mr-2 flex-shrink-0" />
+                        <span className="text-gray-700">{caracteristica}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-200">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setStep(1)}
+                      className="w-full"
+                    >
+                      Cambiar Plan
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </div>
   )
