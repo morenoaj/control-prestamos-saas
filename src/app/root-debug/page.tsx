@@ -227,7 +227,7 @@ export default function RootDebugPage() {
             <div className="space-y-3 text-red-800">
               <div>
                 <h4 className="font-semibold">1. Loop de Re-renders:</h4>
-                <p>Si renderCount {'>'} 10, hay un loop infinito causado por cambios de estado.</p>
+                <p>Si renderCount &gt; 10, hay un loop infinito causado por cambios de estado.</p>
                 <p>Renders actuales: <strong>{renderCount}</strong></p>
               </div>
               

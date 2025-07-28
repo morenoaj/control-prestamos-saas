@@ -1,4 +1,4 @@
-// src/context/AuthContext.tsx - VERSIÓN CON DEBUG MEJORADO
+// src/context/AuthContext.tsx - VERSIÓN CON MEJOR DEBUGGING
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
@@ -71,47 +71,79 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Helper para verificar si el usuario necesita onboarding
   const necesitaOnboarding = useCallback(() => {
-    const hasUser = !!user;
-    const hasUsuario = !!usuario;
-    const hasEmpresas = usuario?.empresas && usuario.empresas.length > 0;
-    const result = hasUser && hasUsuario && !hasEmpresas;
+    // Si no hay usuario autenticado, no puede necesitar onboarding
+    if (!user) {
+      console.log('🔍 ONBOARDING: No hay usuario autenticado');
+      return false;
+    }
     
-    console.log('🔍 NECESITA ONBOARDING - DEBUG:', {
-      hasUser,
-      hasUsuario,
-      empresasArray: usuario?.empresas,
+    // Si no hay perfil de usuario, está en proceso de creación
+    if (!usuario) {
+      console.log('🔍 ONBOARDING: No hay perfil de usuario - en proceso');
+      return false; // Retornar false mientras se crea el perfil
+    }
+    
+    // Verificar si tiene empresas
+    const hasEmpresas = usuario.empresas && Array.isArray(usuario.empresas) && usuario.empresas.length > 0;
+    const result = !hasEmpresas;
+    
+    console.log('🔍 NECESITA ONBOARDING - ANÁLISIS DETALLADO:', {
+      timestamp: new Date().toLocaleTimeString(),
+      hasUser: user ? '✅' : '❌',
+      userEmail: user?.email || 'N/A',
+      hasUsuario: usuario ? '✅' : '❌',
+      usuarioId: usuario?.id || 'N/A',
+      usuarioNombre: usuario?.nombre || 'N/A',
+      empresasRaw: usuario?.empresas,
       empresasLength: usuario?.empresas?.length || 0,
-      hasEmpresas,
-      result,
-      userEmail: user?.email,
-      usuarioNombre: usuario?.nombre
+      empresasArray: usuario?.empresas?.map(e => ({ id: e.empresaId, rol: e.rol })) || [],
+      hasEmpresas: hasEmpresas ? '✅' : '❌',
+      result: result ? '🟡 SÍ NECESITA ONBOARDING' : '🟢 NO NECESITA ONBOARDING',
+      empresaActualId: empresaActual?.id || 'N/A',
+      empresaActualNombre: empresaActual?.nombre || 'N/A'
     });
     
     return result;
-  }, [user, usuario]);
+  }, [user, usuario, empresaActual]);
 
   // Debug effect para monitorear cambios de estado
   useEffect(() => {
-    console.log('🔍 ESTADO COMPLETO - DEBUG:', {
-      user: user ? { email: user.email, uid: user.uid } : null,
+    const estado = {
+      timestamp: new Date().toLocaleTimeString(),
+      user: user ? { 
+        email: user.email, 
+        uid: user.uid,
+        emailVerified: user.emailVerified 
+      } : null,
       usuario: usuario ? { 
         id: usuario.id, 
         nombre: usuario.nombre, 
+        email: usuario.email,
         empresasCount: usuario.empresas?.length || 0,
-        empresas: usuario.empresas
+        empresasRaw: usuario.empresas
       } : null,
-      empresaActual: empresaActual ? { id: empresaActual.id, nombre: empresaActual.nombre } : null,
+      empresaActual: empresaActual ? { 
+        id: empresaActual.id, 
+        nombre: empresaActual.nombre,
+        plan: empresaActual.plan,
+        estado: empresaActual.estado
+      } : null,
       empresasCount: empresas.length,
       loading,
-      necesitaOnboarding: necesitaOnboarding(),
+      necesitaOnboarding: user && usuario ? necesitaOnboarding() : 'N/A',
       authListenerSetup: authListenerSetup.current,
       loadingUserData: loadingUserData.current
-    });
+    };
+    
+    console.log('📊 ESTADO COMPLETO AUTH:', estado);
   }, [user, usuario, empresaActual, empresas, loading, necesitaOnboarding]);
 
   // Setup del listener de autenticación (solo una vez)
   useEffect(() => {
-    if (authListenerSetup.current) return;
+    if (authListenerSetup.current) {
+      console.log('⏸️ Auth listener ya configurado, saltando...');
+      return;
+    }
     
     console.log('🔄 Configurando listener de autenticación...');
     authListenerSetup.current = true;
@@ -119,15 +151,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       // Evitar procesar si ya estamos cargando datos
       if (loadingUserData.current) {
-        console.log('⏸️ Ya cargando datos de usuario, saltando...');
+        console.log('⏸️ Ya cargando datos de usuario, saltando onAuthStateChanged...');
         return;
       }
       
-      console.log('🔄 Auth state changed:', firebaseUser ? `Usuario: ${firebaseUser.email}` : 'No hay usuario');
+      console.log('🔄 Auth state changed:', {
+        hasUser: !!firebaseUser,
+        email: firebaseUser?.email || 'N/A',
+        uid: firebaseUser?.uid || 'N/A',
+        emailVerified: firebaseUser?.emailVerified || false
+      });
       
       try {
         if (firebaseUser) {
           loadingUserData.current = true;
+          setLoading(true);
           
           const authUser: AuthUser = {
             uid: firebaseUser.uid,
@@ -139,7 +177,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           console.log('✅ Estableciendo usuario auth:', authUser);
           setUser(authUser);
+          
+          console.log('📂 Iniciando carga de datos de usuario...');
           await cargarDatosUsuario(firebaseUser);
+          
         } else {
           console.log('❌ No hay usuario - limpiando estado');
           limpiarEstado();
@@ -150,7 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } finally {
         loadingUserData.current = false;
         setLoading(false);
-        console.log('✅ Loading terminado');
+        console.log('✅ Auth state change completado - loading: false');
       }
     });
 
@@ -162,7 +203,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []); // Array vacío - solo se ejecuta una vez
 
   const limpiarEstado = useCallback(() => {
-    console.log('🧹 Limpiando estado completo');
+    console.log('🧹 Limpiando estado completo de auth');
     setUser(null);
     setUsuario(null);
     setEmpresaActual(null);
@@ -175,7 +216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const cargarDatosUsuario = async (firebaseUser: User) => {
     try {
-      console.log('📂 Cargando datos del usuario:', firebaseUser.uid);
+      console.log('📂 Cargando datos del usuario desde Firestore:', firebaseUser.uid);
       
       const usuarioDoc = await getDoc(doc(db, 'usuarios', firebaseUser.uid));
       
@@ -186,7 +227,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           nombre: userData.nombre,
           email: userData.email,
           empresas: userData.empresas,
-          empresasLength: userData.empresas?.length || 0
+          empresasLength: userData.empresas?.length || 0,
+          empresasDetalle: userData.empresas?.map(e => ({ 
+            empresaId: e.empresaId, 
+            rol: e.rol 
+          })) || []
         });
         
         setUsuario(userData);
@@ -198,6 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           console.log('⚠️ Usuario SIN empresas - necesita onboarding');
           console.log('📊 Empresas array:', userData.empresas);
+          console.log('📊 Empresas length:', userData.empresas?.length);
           setEmpresas([]);
           setEmpresaActual(null);
           setRolActual(null);
@@ -208,6 +254,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error: any) {
       console.error('❌ Error cargando datos del usuario:', error);
+      console.log('🔄 Intentando crear usuario en Firestore...');
       await crearUsuarioEnFirestore(firebaseUser);
     }
   };
@@ -234,7 +281,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('✅ Usuario creado en Firestore exitosamente');
       
       const usuarioConId = { id: firebaseUser.uid, ...nuevoUsuario };
-      console.log('📊 Estableciendo usuario con empresas vacías:', usuarioConId);
+      console.log('📊 Estableciendo usuario con empresas vacías:', {
+        id: usuarioConId.id,
+        nombre: usuarioConId.nombre,
+        empresas: usuarioConId.empresas,
+        empresasLength: usuarioConId.empresas.length
+      });
       
       setUsuario(usuarioConId);
       setEmpresas([]);
@@ -259,7 +311,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      console.log('🏢 Cargando empresas del usuario...', userData.empresas);
+      console.log('🏢 Cargando empresas del usuario...', {
+        empresasCount: userData.empresas.length,
+        empresas: userData.empresas.map(e => ({ id: e.empresaId, rol: e.rol }))
+      });
+      
       const empresasIds = userData.empresas.map(e => e.empresaId);
       
       const empresasData: Empresa[] = [];
@@ -268,6 +324,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const batchSize = 10;
       for (let i = 0; i < empresasIds.length; i += batchSize) {
         const batch = empresasIds.slice(i, i + batchSize);
+        console.log(`🔄 Cargando lote ${Math.floor(i/batchSize) + 1}:`, batch);
+        
         const empresasQuery = query(
           collection(db, 'empresas'),
           where('__name__', 'in', batch)
@@ -278,10 +336,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ...doc.data()
         })) as Empresa[];
         
+        console.log(`✅ Lote cargado:`, batchData.map(e => ({ id: e.id, nombre: e.nombre })));
         empresasData.push(...batchData);
       }
 
-      console.log('✅ Empresas cargadas:', empresasData.length, empresasData);
+      console.log('✅ Empresas cargadas:', {
+        total: empresasData.length,
+        empresas: empresasData.map(e => ({ 
+          id: e.id, 
+          nombre: e.nombre, 
+          plan: e.plan, 
+          estado: e.estado 
+        }))
+      });
+      
       setEmpresas(empresasData);
 
       // Establecer empresa actual
@@ -292,14 +360,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const empresaGuardada = localStorage.getItem('empresaActual');
         if (empresaGuardada) {
           empresaActiva = empresasData.find(e => e.id === empresaGuardada);
-          console.log('🏢 Empresa desde localStorage:', empresaActiva?.nombre);
+          console.log('🏢 Empresa desde localStorage:', {
+            id: empresaGuardada,
+            found: !!empresaActiva,
+            nombre: empresaActiva?.nombre || 'N/A'
+          });
         }
       }
       
       // Si no hay en localStorage, tomar la primera activa
       if (!empresaActiva) {
         empresaActiva = empresasData.find(e => e.estado === 'activa') || empresasData[0];
-        console.log('🏢 Empresa seleccionada automáticamente:', empresaActiva?.nombre);
+        console.log('🏢 Empresa seleccionada automáticamente:', {
+          criterio: 'primera activa o primera disponible',
+          empresa: empresaActiva ? {
+            id: empresaActiva.id,
+            nombre: empresaActiva.nombre,
+            estado: empresaActiva.estado
+          } : null
+        });
       }
 
       if (empresaActiva) {
@@ -313,9 +392,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         
         console.log('✅ Empresa actual establecida:', {
-          empresa: empresaActiva.nombre,
-          rol: rolEmpresa?.rol
+          empresa: {
+            id: empresaActiva.id,
+            nombre: empresaActiva.nombre,
+            plan: empresaActiva.plan,
+            estado: empresaActiva.estado
+          },
+          rol: rolEmpresa?.rol || 'N/A'
         });
+      } else {
+        console.log('⚠️ No se pudo establecer empresa actual');
       }
     } catch (error) {
       console.error('❌ Error cargando empresas:', error);
@@ -401,7 +487,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const cambiarEmpresa = useCallback(async (empresaId: string) => {
     const empresa = empresas.find(e => e.id === empresaId);
     if (empresa && usuario) {
-      console.log('🔄 Cambiando a empresa:', empresa.nombre);
+      console.log('🔄 Cambiando a empresa:', {
+        de: empresaActual?.nombre || 'N/A',
+        a: empresa.nombre,
+        empresaId
+      });
+      
       setEmpresaActual(empresa);
       
       const rolEmpresa = usuario.empresas.find(e => e.empresaId === empresaId);
@@ -410,8 +501,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (typeof window !== 'undefined') {
         localStorage.setItem('empresaActual', empresaId);
       }
+      
+      console.log('✅ Empresa cambiada:', {
+        empresa: empresa.nombre,
+        rol: rolEmpresa?.rol || 'N/A'
+      });
     }
-  }, [empresas, usuario]);
+  }, [empresas, usuario, empresaActual]);
 
   const actualizarPerfil = useCallback(async (data: Partial<Usuario>) => {
     if (!user || !usuario) return;
@@ -444,10 +540,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (user && auth.currentUser && !loadingUserData.current) {
       console.log('🔄 Recargando datos del usuario...');
       loadingUserData.current = true;
+      setLoading(true);
       try {
         await cargarDatosUsuario(auth.currentUser);
       } finally {
         loadingUserData.current = false;
+        setLoading(false);
+        console.log('✅ Recarga de usuario completada');
       }
     }
   }, [user]);

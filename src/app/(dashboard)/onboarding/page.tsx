@@ -1,7 +1,7 @@
-// src/app/onboarding/page.tsx - CON SELECTOR DE PLANES
+// src/app/(dashboard)/onboarding/page.tsx - VERSIÓN CORREGIDA
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -105,8 +105,16 @@ export default function OnboardingPage() {
   const [selectedPlan, setSelectedPlan] = useState<string>('premium')
   const [step, setStep] = useState(1) // 1: seleccionar plan, 2: datos empresa
   const router = useRouter()
-  const { user, reloadUser } = useAuth()
+  const { user, usuario, necesitaOnboarding, reloadUser } = useAuth()
   const { crearEmpresa } = useCompany()
+
+  // Verificar si el usuario ya no necesita onboarding
+  useEffect(() => {
+    if (user && usuario && !necesitaOnboarding()) {
+      console.log('✅ Usuario ya tiene empresa, redirigiendo a dashboard')
+      router.replace('/dashboard')
+    }
+  }, [user, usuario, necesitaOnboarding, router])
 
   const {
     register,
@@ -130,10 +138,15 @@ export default function OnboardingPage() {
   }
 
   const onSubmit = async (data: EmpresaFormData) => {
+    if (isLoading) return
+    
     setIsLoading(true)
     
     try {
       const planElegido = planes.find(p => p.id === data.plan)
+      
+      console.log('🏢 Iniciando creación de empresa...')
+      console.log('📊 Datos de empresa:', data)
       
       // Preparar datos de la empresa
       const empresaData = {
@@ -158,17 +171,20 @@ export default function OnboardingPage() {
       const empresaId = await crearEmpresa(empresaData as any)
       console.log('✅ Empresa creada con ID:', empresaId)
       
-      // Recargar datos del usuario
-      await reloadUser()
-      
+      // Mostrar toast de éxito
       toast({
         title: `¡Empresa creada con plan ${planElegido?.nombre}! 🎉`,
         description: `${data.nombre} ha sido configurada correctamente`,
       })
       
-      // Redirigir al dashboard
+      console.log('🔄 Recargando datos del usuario...')
+      // Recargar datos del usuario para actualizar el estado
+      await reloadUser()
+      
+      // Dar un momento para que se actualicen los datos
       setTimeout(() => {
-        window.location.href = '/dashboard'
+        console.log('✅ Redirigiendo a dashboard...')
+        router.replace('/dashboard')
       }, 1500)
       
     } catch (error: any) {
@@ -178,7 +194,6 @@ export default function OnboardingPage() {
         description: error.message || "No se pudo crear la empresa. Intenta nuevamente.",
         variant: "destructive"
       })
-    } finally {
       setIsLoading(false)
     }
   }
@@ -210,6 +225,39 @@ export default function OnboardingPage() {
           maxUsuarios: 1
         }
     }
+  }
+
+  // Mostrar loading si no hay usuario o usuario
+  if (!user || !usuario) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
+          <p className="text-gray-600">Cargando datos del usuario...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Si está procesando la empresa, mostrar loading especial
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
+        <div className="text-center space-y-4">
+          <div className="relative">
+            <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-blue-700 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Building2 className="h-8 w-8 text-white" />
+            </div>
+            <Loader2 className="h-6 w-6 animate-spin absolute -bottom-1 -right-1 text-blue-600 bg-white rounded-full" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900">Creando tu empresa...</h3>
+          <p className="text-gray-600">Configurando tu cuenta empresarial</p>
+          <div className="w-full max-w-xs mx-auto bg-gray-200 rounded-full h-2">
+            <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '75%' }}></div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const planActual = planes.find(p => p.id === selectedPlan)
@@ -348,6 +396,7 @@ export default function OnboardingPage() {
                         placeholder="Mi Empresa de Préstamos"
                         {...register('nombre')}
                         className={errors.nombre ? 'border-red-500' : ''}
+                        disabled={isLoading}
                       />
                       {errors.nombre && (
                         <p className="text-sm text-red-500">{errors.nombre.message}</p>
@@ -362,6 +411,7 @@ export default function OnboardingPage() {
                         placeholder="contacto@miempresa.com"
                         {...register('email')}
                         className={errors.email ? 'border-red-500' : ''}
+                        disabled={isLoading}
                       />
                       {errors.email && (
                         <p className="text-sm text-red-500">{errors.email.message}</p>
@@ -375,6 +425,7 @@ export default function OnboardingPage() {
                         placeholder="+507 6000-0000"
                         {...register('telefono')}
                         className={errors.telefono ? 'border-red-500' : ''}
+                        disabled={isLoading}
                       />
                       {errors.telefono && (
                         <p className="text-sm text-red-500">{errors.telefono.message}</p>
@@ -388,6 +439,7 @@ export default function OnboardingPage() {
                         placeholder="Calle Principal, Ciudad, País"
                         {...register('direccion')}
                         className={errors.direccion ? 'border-red-500' : ''}
+                        disabled={isLoading}
                       />
                       {errors.direccion && (
                         <p className="text-sm text-red-500">{errors.direccion.message}</p>
@@ -401,6 +453,7 @@ export default function OnboardingPage() {
                       variant="outline" 
                       onClick={() => setStep(1)}
                       className="flex-1"
+                      disabled={isLoading}
                     >
                       Volver a Planes
                     </Button>
@@ -410,7 +463,7 @@ export default function OnboardingPage() {
                       className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
                     >
                       {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Crear Empresa
+                      {isLoading ? 'Creando...' : 'Crear Empresa'}
                     </Button>
                   </div>
                 </div>
@@ -453,6 +506,7 @@ export default function OnboardingPage() {
                       variant="outline" 
                       onClick={() => setStep(1)}
                       className="w-full"
+                      disabled={isLoading}
                     >
                       Cambiar Plan
                     </Button>
