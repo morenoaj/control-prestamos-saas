@@ -1,4 +1,4 @@
-// src/app/(dashboard)/dashboard/onboarding/page.tsx - SIN REDIRECCIONES
+// src/app/(dashboard)/dashboard/onboarding/page.tsx - SIMPLIFICADO
 'use client'
 
 import { useState } from 'react'
@@ -18,8 +18,6 @@ import {
   CheckCircle, 
   Star, 
   Users, 
-  CreditCard, 
-  BarChart3,
   Zap,
   Crown,
   Rocket
@@ -120,8 +118,6 @@ export default function OnboardingPage() {
     }
   })
 
-  const planSeleccionado = watch('plan')
-
   const handlePlanSelect = (planId: string) => {
     setSelectedPlan(planId)
     setValue('plan', planId as any)
@@ -135,7 +131,7 @@ export default function OnboardingPage() {
     try {
       const planElegido = planes.find(p => p.id === data.plan)
       
-      console.log('🏢 Iniciando creación de empresa...')
+      console.log('🏢 Creando empresa con datos:', data)
       
       // Preparar datos de la empresa
       const empresaData = {
@@ -155,8 +151,6 @@ export default function OnboardingPage() {
         limites: getLimitesPorPlan(data.plan)
       }
 
-      console.log('🏢 Creando empresa con plan:', data.plan)
-      
       const empresaId = await crearEmpresa(empresaData as any)
       console.log('✅ Empresa creada con ID:', empresaId)
       
@@ -170,7 +164,7 @@ export default function OnboardingPage() {
       // Recargar datos del usuario para actualizar el estado
       await reloadUser()
       
-      console.log('✅ Onboarding completado - RedirectManager se encargará de la redirección')
+      console.log('✅ Onboarding completado - RedirectManager manejará la redirección')
       
     } catch (error: any) {
       console.error('❌ Error creando empresa:', error)
@@ -179,6 +173,7 @@ export default function OnboardingPage() {
         description: error.message || "No se pudo crear la empresa. Intenta nuevamente.",
         variant: "destructive"
       })
+    } finally {
       setIsLoading(false)
     }
   }
@@ -186,33 +181,17 @@ export default function OnboardingPage() {
   const getLimitesPorPlan = (plan: string) => {
     switch (plan) {
       case 'basico':
-        return {
-          maxClientes: 100,
-          maxPrestamos: 500,
-          maxUsuarios: 1
-        }
+        return { maxClientes: 100, maxPrestamos: 500, maxUsuarios: 1 }
       case 'premium':
-        return {
-          maxClientes: 1000,
-          maxPrestamos: -1, // ilimitado
-          maxUsuarios: 5
-        }
+        return { maxClientes: 1000, maxPrestamos: -1, maxUsuarios: 5 }
       case 'enterprise':
-        return {
-          maxClientes: -1, // ilimitado
-          maxPrestamos: -1, // ilimitado
-          maxUsuarios: -1 // ilimitado
-        }
+        return { maxClientes: -1, maxPrestamos: -1, maxUsuarios: -1 }
       default:
-        return {
-          maxClientes: 100,
-          maxPrestamos: 500,
-          maxUsuarios: 1
-        }
+        return { maxClientes: 100, maxPrestamos: 500, maxUsuarios: 1 }
     }
   }
 
-  // Si está procesando la empresa, mostrar loading especial
+  // Loading state mientras procesa
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">

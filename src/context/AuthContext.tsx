@@ -1,4 +1,4 @@
-// src/context/AuthContext.tsx - VERSIÓN SIMPLIFICADA SIN LOOPS
+// src/context/AuthContext.tsx - VERSIÓN OPTIMIZADA
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
@@ -36,7 +36,7 @@ interface AuthContextType {
   empresas: Empresa[];
   rolActual: UsuarioEmpresa['rol'] | null;
   loading: boolean;
-  initialized: boolean; // Nuevo estado para saber cuándo está listo
+  initialized: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, nombre: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
@@ -67,68 +67,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
   
-  // Ref para evitar múltiples ejecuciones
+  // Refs para control de estado
   const authSetup = useRef(false);
+  const isLoadingUserData = useRef(false);
+  const lastUserLoaded = useRef<string>('');
 
-  // Función para verificar onboarding - ESTABLE
+  // Función estable para verificar onboarding
   const necesitaOnboarding = useCallback(() => {
     if (!user || !usuario) return false;
     return !usuario.empresas || usuario.empresas.length === 0;
-  }, [user?.uid, usuario?.empresas?.length]); // Dependencies específicas
+  }, [user?.uid, usuario?.empresas?.length]);
 
-  // ÚNICO listener de auth - se ejecuta solo una vez
-  useEffect(() => {
-    if (authSetup.current) return;
-    
-    console.log('🔄 Configurando auth listener...');
-    authSetup.current = true;
-    
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log('🔄 Auth state changed:', !!firebaseUser);
-      
-      try {
-        if (firebaseUser) {
-          const authUser: AuthUser = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            displayName: firebaseUser.displayName,
-            photoURL: firebaseUser.photoURL,
-            emailVerified: firebaseUser.emailVerified
-          };
-          
-          setUser(authUser);
-          await cargarDatosUsuario(firebaseUser);
-        } else {
-          limpiarEstado();
-        }
-      } catch (error) {
-        console.error('❌ Error en auth state:', error);
-        limpiarEstado();
-      } finally {
-        setLoading(false);
-        setInitialized(true);
-        console.log('✅ Auth inicializado completamente');
-      }
-    });
-
-    return () => {
-      unsubscribe();
-      authSetup.current = false;
-    };
-  }, []);
-
+  // Limpiar estado de forma segura
   const limpiarEstado = useCallback(() => {
+    console.log('🧹 Limpiando estado de auth');
     setUser(null);
     setUsuario(null);
     setEmpresaActual(null);
     setEmpresas([]);
     setRolActual(null);
+    lastUserLoaded.current = '';
     if (typeof window !== 'undefined') {
       localStorage.removeItem('empresaActual');
     }
   }, []);
 
+  // Cargar datos del usuario
   const cargarDatosUsuario = async (firebaseUser: User) => {
+    // Evitar cargas duplicadas
+    if (isLoadingUserData.current || lastUserLoaded.current === firebaseUser.uid) {
+      console.log('⏭️ Saltando carga de usuario (ya en proceso o cargado)');
+      return;
+    }
+
+    isLoadingUserData.current = true;
+    lastUserLoaded.current = firebaseUser.uid;
+
     try {
       console.log('📂 Cargando datos usuario:', firebaseUser.uid);
       
@@ -146,22 +120,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (userData.empresas && userData.empresas.length > 0) {
           await cargarEmpresasUsuario(userData);
         } else {
-          console.log('⚠️ Usuario sin empresas');
+          console.log('⚠️ Usuario sin empresas - requiere onboarding');
           setEmpresas([]);
           setEmpresaActual(null);
+          setRolActual(null);
         }
       } else {
-        console.log('📝 Creando usuario nuevo...');
+        console.log('📝 Usuario no existe - creando perfil...');
         await crearUsuarioEnFirestore(firebaseUser);
       }
     } catch (error) {
       console.error('❌ Error cargando usuario:', error);
+      // En caso de error, intentar crear usuario
       await crearUsuarioEnFirestore(firebaseUser);
+    } finally {
+      isLoadingUserData.current = false;
     }
   };
 
+  // Crear usuario en Firestore
   const crearUsuarioEnFirestore = async (firebaseUser: User) => {
     try {
+      console.log('🆕 Creando usuario en Firestore...');
       const nuevoUsuario: Omit<Usuario, 'id'> = {
         email: firebaseUser.email || '',
         nombre: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuario',
@@ -180,16 +160,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUsuario({ id: firebaseUser.uid, ...nuevoUsuario });
       setEmpresas([]);
       setEmpresaActual(null);
+      setRolActual(null);
     } catch (error) {
       console.error('❌ Error creando usuario:', error);
     }
   };
 
+  // Cargar empresas del usuario
   const cargarEmpresasUsuario = async (userData: Usuario) => {
     try {
       if (!userData.empresas || userData.empresas.length === 0) {
+        console.log('⚠️ Usuario sin empresas asignadas');
         setEmpresas([]);
         setEmpresaActual(null);
+        setRolActual(null);
         return;
       }
 
@@ -198,50 +182,101 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const empresasIds = userData.empresas.map(e => e.empresaId);
       const empresasData: Empresa[] = [];
       
-      // Cargar empresas
-      const empresasQuery = query(
-        collection(db, 'empresas'),
-        where('__name__', 'in', empresasIds.slice(0, 10)) // Máximo 10
-      );
-      
-      const empresasSnapshot = await getDocs(empresasQuery);
-      empresasSnapshot.docs.forEach(doc => {
-        empresasData.push({ id: doc.id, ...doc.data() } as Empresa);
-      });
+      // Cargar empresas en batches (Firestore límite de 10 en 'in')
+      const batchSize = 10;
+      for (let i = 0; i < empresasIds.length; i += batchSize) {
+        const batch = empresasIds.slice(i, i + batchSize);
+        const empresasQuery = query(
+          collection(db, 'empresas'),
+          where('__name__', 'in', batch)
+        );
+        
+        const empresasSnapshot = await getDocs(empresasQuery);
+        empresasSnapshot.docs.forEach(doc => {
+          empresasData.push({ id: doc.id, ...doc.data() } as Empresa);
+        });
+      }
 
       console.log('✅ Empresas cargadas:', empresasData.length);
       setEmpresas(empresasData);
 
       // Establecer empresa actual
-      let empresaActiva = empresasData[0]; // Por defecto la primera
-      
-      // Intentar desde localStorage
-      if (typeof window !== 'undefined') {
-        const empresaGuardada = localStorage.getItem('empresaActual');
-        if (empresaGuardada) {
-          const empresaEncontrada = empresasData.find(e => e.id === empresaGuardada);
-          if (empresaEncontrada) empresaActiva = empresaEncontrada;
+      if (empresasData.length > 0) {
+        let empresaActiva = empresasData[0]; // Por defecto la primera
+        
+        // Intentar desde localStorage
+        if (typeof window !== 'undefined') {
+          const empresaGuardada = localStorage.getItem('empresaActual');
+          if (empresaGuardada) {
+            const empresaEncontrada = empresasData.find(e => e.id === empresaGuardada);
+            if (empresaEncontrada) {
+              empresaActiva = empresaEncontrada;
+            }
+          }
         }
-      }
 
-      if (empresaActiva) {
         setEmpresaActual(empresaActiva);
-        const rolEmpresa = userData.empresas.find(e => e.empresaId === empresaActiva!.id);
+        const rolEmpresa = userData.empresas.find(e => e.empresaId === empresaActiva.id);
         setRolActual(rolEmpresa?.rol || null);
         
         if (typeof window !== 'undefined') {
           localStorage.setItem('empresaActual', empresaActiva.id);
         }
         
-        console.log('✅ Empresa actual:', empresaActiva.nombre);
+        console.log('✅ Empresa actual establecida:', empresaActiva.nombre);
       }
     } catch (error) {
       console.error('❌ Error cargando empresas:', error);
       setEmpresas([]);
       setEmpresaActual(null);
+      setRolActual(null);
     }
   };
 
+  // Listener de autenticación - UNA SOLA VEZ
+  useEffect(() => {
+    if (authSetup.current) return;
+    
+    console.log('🔄 Configurando listener de autenticación...');
+    authSetup.current = true;
+    
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log('🔄 Auth state changed:', !!firebaseUser);
+      
+      try {
+        if (firebaseUser) {
+          const authUser: AuthUser = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            displayName: firebaseUser.displayName,
+            photoURL: firebaseUser.photoURL,
+            emailVerified: firebaseUser.emailVerified
+          };
+          
+          setUser(authUser);
+          await cargarDatosUsuario(firebaseUser);
+        } else {
+          console.log('👋 Usuario deslogueado');
+          limpiarEstado();
+        }
+      } catch (error) {
+        console.error('❌ Error en auth state change:', error);
+        limpiarEstado();
+      } finally {
+        setLoading(false);
+        setInitialized(true);
+        console.log('✅ Auth inicializado:', !!firebaseUser);
+      }
+    });
+
+    return () => {
+      console.log('🔄 Limpiando listener de auth');
+      unsubscribe();
+      authSetup.current = false;
+    };
+  }, [limpiarEstado]);
+
+  // Funciones de autenticación
   const signIn = async (email: string, password: string): Promise<void> => {
     await signInWithEmailAndPassword(auth, email, password);
   };
@@ -267,6 +302,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    console.log('👋 Cerrando sesión...');
     if (typeof window !== 'undefined') {
       localStorage.removeItem('empresaActual');
     }
@@ -284,6 +320,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const cambiarEmpresa = useCallback(async (empresaId: string) => {
     const empresa = empresas.find(e => e.id === empresaId);
     if (empresa && usuario) {
+      console.log('🔄 Cambiando empresa a:', empresa.nombre);
       setEmpresaActual(empresa);
       const rolEmpresa = usuario.empresas.find(e => e.empresaId === empresaId);
       setRolActual(rolEmpresa?.rol || null);
@@ -297,6 +334,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const actualizarPerfil = useCallback(async (data: Partial<Usuario>) => {
     if (!user || !usuario) return;
 
+    console.log('📝 Actualizando perfil usuario...');
     const datosActualizados = { ...usuario, ...data };
     await setDoc(doc(db, 'usuarios', user.uid), datosActualizados);
     setUsuario(datosActualizados);
@@ -315,6 +353,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const reloadUser = useCallback(async () => {
     if (user && auth.currentUser) {
+      console.log('🔄 Recargando datos del usuario...');
+      // Resetear flags para permitir recarga
+      lastUserLoaded.current = '';
+      isLoadingUserData.current = false;
       await cargarDatosUsuario(auth.currentUser);
     }
   }, [user]);
@@ -326,7 +368,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     empresas,
     rolActual,
     loading,
-    initialized, // Nuevo
+    initialized,
     signIn,
     signUp,
     signInWithGoogle,

@@ -1,8 +1,7 @@
-// src/app/(auth)/login/page.tsx - SIN ROUTER EN RENDER
+// src/app/(auth)/login/page.tsx - SIMPLIFICADO
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -27,11 +26,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
-  const router = useRouter()
-  const { user, empresaActual, necesitaOnboarding, signIn, signInWithGoogle, loading } = useAuth()
-  
-  // Ref para evitar múltiples redirecciones
-  const redirecting = useRef(false)
+  const { signIn, signInWithGoogle } = useAuth()
 
   const {
     register,
@@ -41,55 +36,6 @@ export default function LoginPage() {
     resolver: zodResolver(loginSchema),
   })
 
-  // Manejar redirecciones automáticas cuando el usuario ya está logueado
-  useEffect(() => {
-    // No hacer nada mientras está cargando
-    if (loading) return
-
-    // Si hay usuario y no está redirigiendo
-    if (user && !redirecting.current) {
-      console.log('🔄 Usuario ya logueado en login page, verificando redirección...')
-      console.log('🔍 Estado para redirección:', {
-        user: user.email,
-        necesitaOnboarding: necesitaOnboarding(),
-        empresaActual: empresaActual?.nombre,
-        redirecting: redirecting.current
-      })
-      
-      redirecting.current = true
-      
-      // Usar setTimeout para evitar el error de setState durante render
-      setTimeout(() => {
-        if (necesitaOnboarding()) {
-          console.log('➡️ Redirigiendo a onboarding desde login')
-          router.replace('/dashboard/onboarding')
-        } else if (empresaActual) {
-          console.log('➡️ Redirigiendo a dashboard desde login')
-          router.replace('/dashboard')
-        } else {
-          console.log('⏳ Esperando datos de empresa...')
-          // Dar un poco más de tiempo para que se carguen los datos
-          setTimeout(() => {
-            if (necesitaOnboarding()) {
-              console.log('➡️ Timeout: Redirigiendo a onboarding')
-              router.replace('/dashboard/onboarding')
-            } else {
-              console.log('➡️ Timeout: Redirigiendo a dashboard')
-              router.replace('/dashboard')
-            }
-          }, 1000)
-        }
-      }, 100) // Pequeño delay para evitar el error
-    }
-  }, [user, empresaActual, necesitaOnboarding, router, loading])
-
-  // Reset redirecting flag when user changes
-  useEffect(() => {
-    if (!user) {
-      redirecting.current = false
-    }
-  }, [user?.uid])
-
   const onSubmit = async (data: LoginFormData) => {
     if (isLoading) return
     
@@ -98,22 +44,20 @@ export default function LoginPage() {
     
     try {
       await signIn(data.email, data.password)
-      
       toast({
         title: "Bienvenido",
         description: "Has iniciado sesión correctamente",
       })
-
-      console.log('✅ Login exitoso, esperando redirección automática')
-      
+      // RedirectManager se encarga de la redirección automática
     } catch (error: any) {
       setError(error.message || 'Error al iniciar sesión')
-      setIsLoading(false)
       toast({
         title: "Error",
         description: error.message || 'Error al iniciar sesión',
         variant: "destructive"
       })
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -125,66 +69,23 @@ export default function LoginPage() {
     
     try {
       await signInWithGoogle()
-      
       toast({
         title: "Bienvenido",
         description: "Has iniciado sesión con Google correctamente",
       })
-
-      console.log('✅ Login con Google exitoso, esperando redirección automática')
-      
+      // RedirectManager se encarga de la redirección automática
     } catch (error: any) {
       setError(error.message || 'Error al iniciar sesión con Google')
-      setIsLoading(false)
       toast({
         title: "Error",
         description: error.message || 'Error al iniciar sesión con Google',
         variant: "destructive"
       })
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  // Mostrar loading mientras verifica autenticación
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
-        <div className="text-center space-y-4">
-          <div className="relative">
-            <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-blue-700 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-              <Calculator className="h-8 w-8 text-white" />
-            </div>
-            <Loader2 className="h-6 w-6 animate-spin absolute -bottom-1 -right-1 text-blue-600 bg-white rounded-full" />
-          </div>
-          <h3 className="text-lg font-semibold text-gray-900">Verificando sesión...</h3>
-          <p className="text-gray-600">Un momento por favor</p>
-        </div>
-      </div>
-    )
-  }
-
-  // Si hay usuario y está redirigiendo, mostrar loading
-  if (user && redirecting.current) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
-        <div className="text-center space-y-4">
-          <div className="relative">
-            <div className="w-16 h-16 bg-gradient-to-r from-green-600 to-green-700 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Shield className="h-8 w-8 text-white" />
-            </div>
-            <Loader2 className="h-6 w-6 animate-spin absolute -bottom-1 -right-1 text-green-600 bg-white rounded-full" />
-          </div>
-          <h3 className="text-lg font-semibold text-gray-900">
-            {necesitaOnboarding() ? 'Configurando empresa...' : 'Accediendo al dashboard...'}
-          </h3>
-          <p className="text-gray-600">
-            {necesitaOnboarding() ? 'Te llevaremos al formulario de onboarding' : 'Redirigiendo...'}
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  // Solo mostrar el formulario si NO hay usuario
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50">
       {/* Background decorations */}
