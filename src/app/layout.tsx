@@ -1,4 +1,4 @@
-// src/app/layout.tsx - VERSIÓN MEJORADA CON REDIRECT MANAGER
+// src/app/layout.tsx - VERSIÓN SEGURA PARA HYDRATION
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
@@ -27,8 +27,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="es" suppressHydrationWarning>
-      <body className={inter.className}>
+    <html lang="es" suppressHydrationWarning={true}>
+      <body className={inter.className} suppressHydrationWarning={true}>
         <AuthProvider>
           <CompanyProvider>
             <RedirectManager>

@@ -1,4 +1,10 @@
-// src/app/(dashboard)/dashboard/onboarding/page.tsx - SIMPLIFICADO
+// src/app/(dashboard)/dashboard/onboarding/page.tsx
+// MOVER ESTE ARCHIVO A: src/app/(dashboard)/onboarding/page.tsx
+
+// La estructura de carpetas debe ser:
+// src/app/(dashboard)/onboarding/page.tsx
+// NO: src/app/(dashboard)/dashboard/onboarding/page.tsx
+
 'use client'
 
 import { useState } from 'react'

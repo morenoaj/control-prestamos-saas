@@ -1,7 +1,7 @@
-// src/components/RedirectManager.tsx - VERSIÓN OPTIMIZADA FINAL
+// src/components/RedirectManager.tsx - VERSIÓN SEGURA PARA HYDRATION
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { Loader2, Calculator, CheckCircle } from 'lucide-react'
@@ -15,16 +15,26 @@ export function RedirectManager({ children }: RedirectManagerProps) {
   const pathname = usePathname()
   const { user, empresaActual, necesitaOnboarding, loading, initialized } = useAuth()
   
-  // Refs para controlar redirecciones y evitar loops
-  const lastRedirect = useRef<string>('')
+  // Estado para controlar si estamos en el cliente (post-hydration)
+  const [isMounted, setIsMounted] = useState(false)
+  const [redirecting, setRedirecting] = useState(false)
+  const [redirectReason, setRedirectReason] = useState('')
   const redirectTimeout = useRef<NodeJS.Timeout | undefined>(undefined)
-  const isRedirecting = useRef<boolean>(false)
-  const lastEvaluatedPath = useRef<string>('')
+  const lastEvaluationKey = useRef<string>('')
+
+  // Efecto para marcar cuando el componente está montado en el cliente
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   useEffect(() => {
+    // No hacer nada hasta que esté montado en el cliente
+    if (!isMounted) return
+
     // Limpiar timeout anterior
     if (redirectTimeout.current) {
       clearTimeout(redirectTimeout.current)
+      redirectTimeout.current = undefined
     }
 
     // No hacer nada si no está inicializado
@@ -33,58 +43,60 @@ export function RedirectManager({ children }: RedirectManagerProps) {
     // Si está cargando datos críticos del usuario, esperar
     if (loading && user) return
 
-    // Evitar evaluaciones duplicadas en la misma ruta
-    const currentState = `${pathname}-${!!user}-${!!empresaActual}-${user ? necesitaOnboarding() : 'nouser'}`
-    if (lastEvaluatedPath.current === currentState || isRedirecting.current) {
-      return
-    }
-    lastEvaluatedPath.current = currentState
+    // Crear clave única para evitar evaluaciones duplicadas
+    const evaluationKey = `${pathname}-${!!user}-${!!empresaActual}-${user ? necesitaOnboarding() : 'nouser'}`
+    
+    // Si ya evaluamos este estado exacto, no hacer nada
+    if (lastEvaluationKey.current === evaluationKey) return
+    lastEvaluationKey.current = evaluationKey
 
-    // Función para realizar redirección con debounce mejorado
+    // Función para realizar redirección optimizada
     const performRedirect = (targetPath: string, reason: string) => {
-      // Evitar redirecciones duplicadas o si ya estamos en la ruta objetivo
-      if (lastRedirect.current === targetPath || pathname === targetPath || isRedirecting.current) {
-        return
-      }
+      // Si ya estamos en la ruta objetivo, no redirigir
+      if (pathname === targetPath) return
       
       console.log(`🔄 RedirectManager: ${reason} -> ${targetPath}`)
-      lastRedirect.current = targetPath
-      isRedirecting.current = true
+      setRedirectReason(reason)
+      setRedirecting(true)
       
-      // Usar timeout para evitar redirecciones durante render
+      // Redirección con cleanup
       redirectTimeout.current = setTimeout(() => {
         router.replace(targetPath)
-        // Reset flag después de la redirección con un delay mayor
+        
+        // Limpiar estado después de un tiempo prudencial
         setTimeout(() => {
-          isRedirecting.current = false
-          lastEvaluatedPath.current = '' // Reset para permitir nueva evaluación
+          setRedirecting(false)
+          setRedirectReason('')
         }, 1500)
-      }, 150) // Delay ligeramente mayor para mejor estabilidad
+      }, 100)
     }
 
     // Definir rutas
     const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/register')
     const isLandingPage = pathname === '/'
     const isDashboardRoute = pathname.startsWith('/dashboard')
-    const isOnboardingRoute = pathname.includes('/dashboard/onboarding')
+    const isOnboardingRoute = pathname === '/onboarding'
 
     console.log('🔍 RedirectManager evaluando:', {
       pathname,
       hasUser: !!user,
       hasEmpresa: !!empresaActual,
-      needsOnboarding: user ? necesitaOnboarding() : 'N/A',
+      needsOnboarding: user ? necesitaOnboarding() : false,
       isAuthRoute,
       isDashboardRoute,
       isOnboardingRoute,
-      isRedirecting: isRedirecting.current
+      initialized,
+      loading,
+      redirecting,
+      isMounted
     })
 
-    // LÓGICA DE REDIRECCIÓN OPTIMIZADA
+    // LÓGICA DE REDIRECCIÓN
     
     // 1. Si no hay usuario autenticado
     if (!user) {
-      if (isDashboardRoute && !isOnboardingRoute) {
-        performRedirect('/login', 'Usuario no autenticado accediendo a dashboard')
+      if (isDashboardRoute || isOnboardingRoute) {
+        performRedirect('/login', 'Usuario no autenticado necesita login')
       }
       return
     }
@@ -93,55 +105,47 @@ export function RedirectManager({ children }: RedirectManagerProps) {
     const needsOnboarding = necesitaOnboarding()
 
     if (needsOnboarding) {
-      // Usuario necesita onboarding - solo redirigir si NO está ya en onboarding
+      // Usuario necesita onboarding
       if (!isOnboardingRoute) {
-        performRedirect('/dashboard/onboarding', 'Usuario necesita completar onboarding')
+        performRedirect('/onboarding', 'Usuario necesita completar onboarding')
       }
       return
     }
 
     // 3. Usuario completó onboarding y tiene empresa
     if (!needsOnboarding && empresaActual) {
-      // Redirigir desde rutas públicas al dashboard
-      if (isAuthRoute || isLandingPage) {
-        performRedirect('/dashboard', 'Usuario autenticado redirigido desde página pública')
-        return
+      // Redirigir desde rutas públicas/auth al dashboard
+      if (isAuthRoute || isLandingPage || isOnboardingRoute) {
+        performRedirect('/dashboard', 'Usuario con empresa completa va al dashboard')
       }
-
-      // Redirigir desde onboarding al dashboard (ya completado)
-      if (isOnboardingRoute) {
-        performRedirect('/dashboard', 'Onboarding ya completado')
-        return
-      }
+      return
     }
 
-    // 4. Estado edge case - usuario sin empresa pero onboarding "completado"
+    // 4. Estado edge case
     if (!needsOnboarding && !empresaActual && user) {
-      console.warn('⚠️ RedirectManager: Estado inconsistente detectado')
-      // Dar tiempo para que se carguen los datos de empresa
-      redirectTimeout.current = setTimeout(() => {
-        if (!empresaActual && !isRedirecting.current) {
-          performRedirect('/dashboard/onboarding', 'Estado inconsistente - requerir onboarding')
-        }
-      }, 2000) // Reducido a 2 segundos
+      console.warn('⚠️ RedirectManager: Estado inconsistente - forzando onboarding')
+      if (!isOnboardingRoute) {
+        performRedirect('/onboarding', 'Estado inconsistente - requiere onboarding')
+      }
     }
 
-    // Cleanup
+    // Cleanup function
     return () => {
       if (redirectTimeout.current) {
         clearTimeout(redirectTimeout.current)
+        redirectTimeout.current = undefined
       }
     }
-  }, [user, empresaActual, necesitaOnboarding, pathname, loading, initialized, router])
+  }, [isMounted, user, empresaActual, necesitaOnboarding, pathname, loading, initialized, router])
 
-  // Reset redirect flags cuando cambia la ruta exitosamente
+  // Limpiar estados cuando cambia la ruta exitosamente
   useEffect(() => {
-    // Solo resetear si no estamos en proceso de redirección
-    if (!isRedirecting.current) {
-      lastRedirect.current = ''
-      lastEvaluatedPath.current = ''
+    if (isMounted && !loading && initialized) {
+      setRedirecting(false)
+      setRedirectReason('')
+      lastEvaluationKey.current = ''
     }
-  }, [pathname])
+  }, [pathname, loading, initialized, isMounted])
 
   // Cleanup al desmontar
   useEffect(() => {
@@ -149,13 +153,26 @@ export function RedirectManager({ children }: RedirectManagerProps) {
       if (redirectTimeout.current) {
         clearTimeout(redirectTimeout.current)
       }
-      isRedirecting.current = false
     }
   }, [])
 
-  // Estados de Loading Mejorados
+  // RENDERIZADO SEGURO PARA HYDRATION
 
-  // Mostrar loading mientras no está inicializado
+  // 1. Durante la hydration, mostrar contenido mínimo
+  if (!isMounted) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-blue-700 rounded-full flex items-center justify-center mx-auto animate-pulse">
+            <Calculator className="h-8 w-8 text-white" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900">Inicializando...</h3>
+        </div>
+      </div>
+    )
+  }
+
+  // 2. Loading inicial de la aplicación
   if (!initialized) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
@@ -168,15 +185,12 @@ export function RedirectManager({ children }: RedirectManagerProps) {
           </div>
           <h3 className="text-lg font-semibold text-gray-900">Inicializando aplicación...</h3>
           <p className="text-gray-600">Configurando tu sesión</p>
-          <div className="w-full max-w-xs mx-auto bg-gray-200 rounded-full h-2">
-            <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '40%' }}></div>
-          </div>
         </div>
       </div>
     )
   }
 
-  // Mostrar loading si está cargando datos críticos del usuario autenticado
+  // 3. Loading de datos del usuario
   if (loading && user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
@@ -188,17 +202,14 @@ export function RedirectManager({ children }: RedirectManagerProps) {
             <Loader2 className="h-6 w-6 animate-spin absolute -bottom-1 -right-1 text-purple-600 bg-white rounded-full" />
           </div>
           <h3 className="text-lg font-semibold text-gray-900">Cargando datos del usuario...</h3>
-          <p className="text-gray-600">Preparando tu dashboard</p>
-          <div className="w-full max-w-xs mx-auto bg-gray-200 rounded-full h-2">
-            <div className="bg-purple-600 h-2 rounded-full animate-pulse" style={{ width: '70%' }}></div>
-          </div>
+          <p className="text-gray-600">Preparando tu workspace</p>
         </div>
       </div>
     )
   }
 
-  // Mostrar loading de redirección si está en proceso
-  if (isRedirecting.current) {
+  // 4. Loading de redirección
+  if (redirecting) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
         <div className="text-center space-y-4">
@@ -208,16 +219,13 @@ export function RedirectManager({ children }: RedirectManagerProps) {
             </div>
             <Loader2 className="h-6 w-6 animate-spin absolute -bottom-1 -right-1 text-green-600 bg-white rounded-full" />
           </div>
-          <h3 className="text-lg font-semibold text-gray-900">Redirigiendo...</h3>
-          <p className="text-gray-600">Te llevamos a la página correcta</p>
-          <div className="w-full max-w-xs mx-auto bg-gray-200 rounded-full h-2">
-            <div className="bg-green-600 h-2 rounded-full animate-pulse" style={{ width: '90%' }}></div>
-          </div>
+          <h3 className="text-lg font-semibold text-gray-900">¡Redirigiendo!</h3>
+          <p className="text-gray-600">{redirectReason}</p>
         </div>
       </div>
     )
   }
 
-  // Renderizar contenido normal
+  // 5. Renderizar contenido normal
   return <>{children}</>
 }
