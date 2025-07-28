@@ -1,10 +1,9 @@
-// src/app/layout.tsx - CON REDIRECCIÓN FORZADA
+// src/app/layout.tsx - CORRECCIÓN DE METADATA
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/context/AuthContext'
 import { CompanyProvider } from '@/context/CompanyContext'
-import { ForceRedirect } from '@/components/ForceRedirect'
 import { Toaster } from '@/components/ui/toaster'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -31,7 +30,6 @@ export default function RootLayout({
       <body className={inter.className}>
         <AuthProvider>
           <CompanyProvider>
-            <ForceRedirect />
             {children}
             <Toaster />
           </CompanyProvider>

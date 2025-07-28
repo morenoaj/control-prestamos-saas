@@ -1,8 +1,7 @@
-// src/app/(dashboard)/onboarding/page.tsx - VERSIÓN CORREGIDA
+// src/app/(dashboard)/dashboard/onboarding/page.tsx - SIN REDIRECCIONES
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -104,17 +103,8 @@ export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<string>('premium')
   const [step, setStep] = useState(1) // 1: seleccionar plan, 2: datos empresa
-  const router = useRouter()
-  const { user, usuario, necesitaOnboarding, reloadUser } = useAuth()
+  const { user, reloadUser } = useAuth()
   const { crearEmpresa } = useCompany()
-
-  // Verificar si el usuario ya no necesita onboarding
-  useEffect(() => {
-    if (user && usuario && !necesitaOnboarding()) {
-      console.log('✅ Usuario ya tiene empresa, redirigiendo a dashboard')
-      router.replace('/dashboard')
-    }
-  }, [user, usuario, necesitaOnboarding, router])
 
   const {
     register,
@@ -146,7 +136,6 @@ export default function OnboardingPage() {
       const planElegido = planes.find(p => p.id === data.plan)
       
       console.log('🏢 Iniciando creación de empresa...')
-      console.log('📊 Datos de empresa:', data)
       
       // Preparar datos de la empresa
       const empresaData = {
@@ -181,11 +170,7 @@ export default function OnboardingPage() {
       // Recargar datos del usuario para actualizar el estado
       await reloadUser()
       
-      // Dar un momento para que se actualicen los datos
-      setTimeout(() => {
-        console.log('✅ Redirigiendo a dashboard...')
-        router.replace('/dashboard')
-      }, 1500)
+      console.log('✅ Onboarding completado - RedirectManager se encargará de la redirección')
       
     } catch (error: any) {
       console.error('❌ Error creando empresa:', error)
@@ -225,18 +210,6 @@ export default function OnboardingPage() {
           maxUsuarios: 1
         }
     }
-  }
-
-  // Mostrar loading si no hay usuario o usuario
-  if (!user || !usuario) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-cyan-50">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-          <p className="text-gray-600">Cargando datos del usuario...</p>
-        </div>
-      </div>
-    )
   }
 
   // Si está procesando la empresa, mostrar loading especial
@@ -399,7 +372,7 @@ export default function OnboardingPage() {
                         disabled={isLoading}
                       />
                       {errors.nombre && (
-                        <p className="text-sm text-red-500">{errors.nombre.message}</p>
+                        <p className="text-sm text-red-600">{errors.nombre.message}</p>
                       )}
                     </div>
 
@@ -414,7 +387,7 @@ export default function OnboardingPage() {
                         disabled={isLoading}
                       />
                       {errors.email && (
-                        <p className="text-sm text-red-500">{errors.email.message}</p>
+                        <p className="text-sm text-red-600">{errors.email.message}</p>
                       )}
                     </div>
 
@@ -428,7 +401,7 @@ export default function OnboardingPage() {
                         disabled={isLoading}
                       />
                       {errors.telefono && (
-                        <p className="text-sm text-red-500">{errors.telefono.message}</p>
+                        <p className="text-sm text-red-600">{errors.telefono.message}</p>
                       )}
                     </div>
 
@@ -442,7 +415,7 @@ export default function OnboardingPage() {
                         disabled={isLoading}
                       />
                       {errors.direccion && (
-                        <p className="text-sm text-red-500">{errors.direccion.message}</p>
+                        <p className="text-sm text-red-600">{errors.direccion.message}</p>
                       )}
                     </div>
                   </div>
