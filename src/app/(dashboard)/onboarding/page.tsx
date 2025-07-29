@@ -1,10 +1,4 @@
-// src/app/(dashboard)/dashboard/onboarding/page.tsx
-// MOVER ESTE ARCHIVO A: src/app/(dashboard)/onboarding/page.tsx
-
-// La estructura de carpetas debe ser:
-// src/app/(dashboard)/onboarding/page.tsx
-// NO: src/app/(dashboard)/dashboard/onboarding/page.tsx
-
+// src/app/(dashboard)/onboarding/page.tsx - VERSIÓN OPTIMIZADA
 'use client'
 
 import { useState } from 'react'
@@ -107,6 +101,7 @@ export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<string>('premium')
   const [step, setStep] = useState(1) // 1: seleccionar plan, 2: datos empresa
+  const [empresaCreada, setEmpresaCreada] = useState(false)
   const { user, reloadUser } = useAuth()
   const { crearEmpresa } = useCompany()
 
@@ -130,7 +125,7 @@ export default function OnboardingPage() {
   }
 
   const onSubmit = async (data: EmpresaFormData) => {
-    if (isLoading) return
+    if (isLoading || empresaCreada) return
     
     setIsLoading(true)
     
@@ -160,6 +155,9 @@ export default function OnboardingPage() {
       const empresaId = await crearEmpresa(empresaData as any)
       console.log('✅ Empresa creada con ID:', empresaId)
       
+      // Marcar que la empresa fue creada exitosamente
+      setEmpresaCreada(true)
+      
       // Mostrar toast de éxito
       toast({
         title: `¡Empresa creada con plan ${planElegido?.nombre}! 🎉`,
@@ -167,13 +165,20 @@ export default function OnboardingPage() {
       })
       
       console.log('🔄 Recargando datos del usuario...')
+      
+      // Esperar un poco antes de recargar para asegurar consistencia
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
       // Recargar datos del usuario para actualizar el estado
       await reloadUser()
       
-      console.log('✅ Onboarding completado - RedirectManager manejará la redirección')
+      console.log('✅ Onboarding completado - esperando redirección automática')
+      
+      // El RedirectManager detectará el cambio y redirigirá al dashboard
       
     } catch (error: any) {
       console.error('❌ Error creando empresa:', error)
+      setEmpresaCreada(false)
       toast({
         title: "Error",
         description: error.message || "No se pudo crear la empresa. Intenta nuevamente.",
@@ -195,6 +200,39 @@ export default function OnboardingPage() {
       default:
         return { maxClientes: 100, maxPrestamos: 500, maxUsuarios: 1 }
     }
+  }
+
+  // Estado de éxito después de crear la empresa
+  if (empresaCreada) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 via-white to-blue-50">
+        <div className="text-center space-y-6">
+          <div className="relative">
+            <div className="w-24 h-24 bg-gradient-to-r from-green-500 to-green-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+              <CheckCircle className="h-12 w-12 text-white" />
+            </div>
+            <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+              <Building2 className="h-4 w-4 text-white" />
+            </div>
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+            ¡Empresa creada exitosamente! 🎉
+          </h1>
+          <p className="text-lg text-gray-600 mb-6">
+            Tu empresa ha sido configurada correctamente.
+            <br />
+            Redirigiendo al dashboard...
+          </p>
+          <div className="w-full max-w-xs mx-auto bg-gray-200 rounded-full h-3">
+            <div className="bg-gradient-to-r from-green-500 to-blue-600 h-3 rounded-full animate-pulse transition-all duration-1000" style={{ width: '95%' }}></div>
+          </div>
+          <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Configurando tu workspace...</span>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   // Loading state mientras procesa

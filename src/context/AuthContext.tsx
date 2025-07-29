@@ -1,4 +1,4 @@
-// src/context/AuthContext.tsx - VERSIÓN SEGURA PARA HYDRATION
+// src/context/AuthContext.tsx - VERSIÓN OPTIMIZADA
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
@@ -75,6 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isLoadingUserData = useRef(false);
   const lastUserLoaded = useRef<string>('');
   const dataLoadPromise = useRef<Promise<void> | null>(null);
+  const reloadPromise = useRef<Promise<void> | null>(null);
 
   // Efecto para marcar cuando el componente está montado en el cliente
   useEffect(() => {
@@ -98,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     lastUserLoaded.current = '';
     isLoadingUserData.current = false;
     dataLoadPromise.current = null;
+    reloadPromise.current = null;
     
     // Solo acceder a localStorage en el cliente
     if (isMounted && typeof window !== 'undefined') {
@@ -106,19 +108,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isMounted]);
 
   // Cargar datos del usuario
-  const cargarDatosUsuario = async (firebaseUser: User): Promise<void> => {
-    // Prevenir cargas duplicadas
-    if (lastUserLoaded.current === firebaseUser.uid) {
+  const cargarDatosUsuario = async (firebaseUser: User, forceReload = false): Promise<void> => {
+    // Prevenir cargas duplicadas a menos que sea forzado
+    if (!forceReload && lastUserLoaded.current === firebaseUser.uid) {
       if (dataLoadPromise.current) {
         console.log('⏳ Esperando carga existente del usuario');
         return dataLoadPromise.current;
       }
+      console.log('✅ Datos del usuario ya cargados, usando cache');
+      return;
     }
 
-    if (isLoadingUserData.current) {
+    if (isLoadingUserData.current && !forceReload) {
       console.log('⏳ Otra carga en progreso, esperando...');
       await new Promise(resolve => setTimeout(resolve, 500));
-      if (lastUserLoaded.current === firebaseUser.uid) return;
+      if (lastUserLoaded.current === firebaseUser.uid && !forceReload) return;
     }
 
     isLoadingUserData.current = true;
@@ -126,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     dataLoadPromise.current = (async () => {
       try {
-        console.log('📂 Cargando datos usuario:', firebaseUser.uid);
+        console.log('📂 Cargando datos usuario:', firebaseUser.uid, forceReload ? '(forzado)' : '');
         
         const usuarioDoc = await getDoc(doc(db, 'usuarios', firebaseUser.uid));
         
@@ -381,12 +385,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, usuario]);
 
   const reloadUser = useCallback(async () => {
-    if (user && auth.currentUser) {
-      console.log('🔄 Recargando datos del usuario...');
-      lastUserLoaded.current = '';
-      isLoadingUserData.current = false;
-      dataLoadPromise.current = null;
-      await cargarDatosUsuario(auth.currentUser);
+    if (!user || !auth.currentUser) {
+      console.log('⚠️ No hay usuario para recargar');
+      return;
+    }
+
+    // Evitar recargas duplicadas
+    if (reloadPromise.current) {
+      console.log('⏳ Recarga ya en progreso, esperando...');
+      return reloadPromise.current;
+    }
+
+    console.log('🔄 Recargando datos del usuario...');
+    
+    reloadPromise.current = (async () => {
+      try {
+        // Forzar recarga de datos
+        lastUserLoaded.current = '';
+        isLoadingUserData.current = false;
+        dataLoadPromise.current = null;
+        
+        await cargarDatosUsuario(auth.currentUser!, true);
+        console.log('✅ Recarga de usuario completada');
+      } catch (error) {
+        console.error('❌ Error recargando usuario:', error);
+        throw error;
+      }
+    })();
+
+    try {
+      await reloadPromise.current;
+    } finally {
+      reloadPromise.current = null;
     }
   }, [user]);
 

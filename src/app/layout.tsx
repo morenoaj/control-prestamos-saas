@@ -1,10 +1,9 @@
-// src/app/layout.tsx - VERSIÓN SEGURA PARA HYDRATION
+// src/app/layout.tsx - SIN REDIRECT MANAGER
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/context/AuthContext'
 import { CompanyProvider } from '@/context/CompanyContext'
-import { RedirectManager } from '@/components/RedirectManager'
 import { Toaster } from '@/components/ui/toaster'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -31,9 +30,7 @@ export default function RootLayout({
       <body className={inter.className} suppressHydrationWarning={true}>
         <AuthProvider>
           <CompanyProvider>
-            <RedirectManager>
-              {children}
-            </RedirectManager>
+            {children}
             <Toaster />
           </CompanyProvider>
         </AuthProvider>
