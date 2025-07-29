@@ -1,4 +1,4 @@
-// src/app/(auth)/login/page.tsx - ULTRA SIMPLE
+// src/app/(auth)/login/page.tsx - SIMPLIFICADO SIN REDIRECCIONES MANUALES
 'use client'
 
 import { useState } from 'react'
@@ -26,7 +26,6 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
-  const [loginSuccess, setLoginSuccess] = useState(false)
   const { signIn, signInWithGoogle } = useAuth()
 
   const {
@@ -47,7 +46,7 @@ export default function LoginPage() {
       console.log('🔐 Iniciando sesión...')
       await signIn(data.email, data.password)
       
-      setLoginSuccess(true)
+      // ✅ NO MANEJAR REDIRECCIÓN AQUÍ - RedirectManager lo hace
       toast({
         title: "¡Bienvenido!",
         description: "Sesión iniciada correctamente",
@@ -76,7 +75,7 @@ export default function LoginPage() {
       console.log('🔐 Iniciando sesión con Google...')
       await signInWithGoogle()
       
-      setLoginSuccess(true)
+      // ✅ NO MANEJAR REDIRECCIÓN AQUÍ - RedirectManager lo hace
       toast({
         title: "¡Bienvenido!",
         description: "Sesión iniciada con Google correctamente",
@@ -93,50 +92,6 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  // Mostrar éxito y enlaces manuales
-  if (loginSuccess) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 via-white to-blue-50">
-        <div className="max-w-md w-full space-y-8">
-          <Card className="shadow-xl border-green-200">
-            <CardHeader className="text-center">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Calculator className="h-8 w-8 text-green-600" />
-              </div>
-              <CardTitle className="text-2xl font-bold text-green-900">¡Sesión Iniciada! 🎉</CardTitle>
-              <CardDescription className="text-green-700">
-                Tu sesión se ha iniciado correctamente
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-center text-gray-700">
-                Elige a dónde quieres ir:
-              </p>
-              
-              <div className="space-y-3">
-                <Link href="/dashboard" className="block">
-                  <Button className="w-full bg-green-600 hover:bg-green-700">
-                    Ir al Dashboard
-                  </Button>
-                </Link>
-                
-                <Link href="/onboarding" className="block">
-                  <Button variant="outline" className="w-full border-green-600 text-green-600 hover:bg-green-50">
-                    Configurar Empresa
-                  </Button>
-                </Link>
-              </div>
-              
-              <div className="text-center text-sm text-gray-500 pt-4">
-                ¿Problemas? <Link href="/" className="text-blue-600 hover:underline">Volver al inicio</Link>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    )
   }
 
   return (

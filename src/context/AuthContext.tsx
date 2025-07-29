@@ -1,7 +1,7 @@
-// src/context/AuthContext.tsx - VERSIÓN OPTIMIZADA
+// src/context/AuthContext.tsx - CORREGIDO CON COOKIES
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { 
   User,
   signInWithEmailAndPassword,
@@ -66,106 +66,85 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [rolActual, setRolActual] = useState<UsuarioEmpresa['rol'] | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
-  
-  // Estado para controlar si estamos en el cliente (post-hydration)
-  const [isMounted, setIsMounted] = useState(false);
-  
-  // Refs para control de estado
-  const authSetup = useRef(false);
-  const isLoadingUserData = useRef(false);
-  const lastUserLoaded = useRef<string>('');
-  const dataLoadPromise = useRef<Promise<void> | null>(null);
-  const reloadPromise = useRef<Promise<void> | null>(null);
 
-  // Efecto para marcar cuando el componente está montado en el cliente
-  useEffect(() => {
-    setIsMounted(true);
+  // ✅ FUNCIÓN PARA MANEJAR COOKIES
+  const setCookies = useCallback(async (firebaseUser: User | null, empresa: Empresa | null) => {
+    if (typeof window === 'undefined') return;
+
+    if (firebaseUser) {
+      try {
+        // Setear cookie de autenticación
+        const token = await firebaseUser.getIdToken();
+        document.cookie = `auth-token=${token}; path=/; max-age=3600; samesite=lax${window.location.protocol === 'https:' ? '; secure' : ''}`;
+        
+        if (empresa) {
+          // Setear cookie de empresa
+          document.cookie = `empresa-actual=${empresa.id}; path=/; max-age=86400; samesite=lax${window.location.protocol === 'https:' ? '; secure' : ''}`;
+        } else {
+          // Limpiar cookie de empresa si no hay empresa
+          document.cookie = 'empresa-actual=; path=/; max-age=0';
+        }
+      } catch (error) {
+        console.error('Error setting cookies:', error);
+      }
+    } else {
+      // Limpiar todas las cookies
+      document.cookie = 'auth-token=; path=/; max-age=0';
+      document.cookie = 'empresa-actual=; path=/; max-age=0';
+    }
   }, []);
 
-  // Función estable para verificar onboarding (sin dependencias de localStorage)
+  // Función para verificar onboarding
   const necesitaOnboarding = useCallback(() => {
     if (!user || !usuario) return false;
     return !usuario.empresas || usuario.empresas.length === 0;
-  }, [user?.uid, usuario?.empresas?.length]);
+  }, [user, usuario]);
 
-  // Limpiar estado de forma segura
+  // Limpiar estado
   const limpiarEstado = useCallback(() => {
-    console.log('🧹 Limpiando estado completo de auth');
+    console.log('🧹 Limpiando estado de auth');
     setUser(null);
     setUsuario(null);
     setEmpresaActual(null);
     setEmpresas([]);
     setRolActual(null);
-    lastUserLoaded.current = '';
-    isLoadingUserData.current = false;
-    dataLoadPromise.current = null;
-    reloadPromise.current = null;
     
-    // Solo acceder a localStorage en el cliente
-    if (isMounted && typeof window !== 'undefined') {
+    // Limpiar localStorage
+    if (typeof window !== 'undefined') {
       localStorage.removeItem('empresaActual');
     }
-  }, [isMounted]);
+  }, []);
 
   // Cargar datos del usuario
-  const cargarDatosUsuario = async (firebaseUser: User, forceReload = false): Promise<void> => {
-    // Prevenir cargas duplicadas a menos que sea forzado
-    if (!forceReload && lastUserLoaded.current === firebaseUser.uid) {
-      if (dataLoadPromise.current) {
-        console.log('⏳ Esperando carga existente del usuario');
-        return dataLoadPromise.current;
-      }
-      console.log('✅ Datos del usuario ya cargados, usando cache');
-      return;
-    }
-
-    if (isLoadingUserData.current && !forceReload) {
-      console.log('⏳ Otra carga en progreso, esperando...');
-      await new Promise(resolve => setTimeout(resolve, 500));
-      if (lastUserLoaded.current === firebaseUser.uid && !forceReload) return;
-    }
-
-    isLoadingUserData.current = true;
-    lastUserLoaded.current = firebaseUser.uid;
-
-    dataLoadPromise.current = (async () => {
-      try {
-        console.log('📂 Cargando datos usuario:', firebaseUser.uid, forceReload ? '(forzado)' : '');
+  const cargarDatosUsuario = async (firebaseUser: User) => {
+    try {
+      console.log('📂 Cargando datos usuario:', firebaseUser.uid);
+      
+      const usuarioDoc = await getDoc(doc(db, 'usuarios', firebaseUser.uid));
+      
+      if (usuarioDoc.exists()) {
+        const userData = { id: usuarioDoc.id, ...usuarioDoc.data() } as Usuario;
+        console.log('✅ Usuario encontrado:', userData.nombre);
         
-        const usuarioDoc = await getDoc(doc(db, 'usuarios', firebaseUser.uid));
+        setUsuario(userData);
         
-        if (usuarioDoc.exists()) {
-          const userData = { id: usuarioDoc.id, ...usuarioDoc.data() } as Usuario;
-          console.log('✅ Usuario encontrado:', {
-            id: userData.id,
-            empresas: userData.empresas?.length || 0
-          });
-          
-          setUsuario(userData);
-          
-          if (userData.empresas && userData.empresas.length > 0) {
-            await cargarEmpresasUsuario(userData);
-          } else {
-            console.log('⚠️ Usuario sin empresas - requiere onboarding');
-            setEmpresas([]);
-            setEmpresaActual(null);
-            setRolActual(null);
-          }
+        if (userData.empresas && userData.empresas.length > 0) {
+          await cargarEmpresasUsuario(userData);
         } else {
-          console.log('📝 Usuario no existe - creando perfil...');
-          await crearUsuarioEnFirestore(firebaseUser);
+          console.log('⚠️ Usuario sin empresas - requiere onboarding');
+          setEmpresas([]);
+          setEmpresaActual(null);
+          setRolActual(null);
+          // No setear cookie de empresa
+          await setCookies(firebaseUser, null);
         }
-      } catch (error) {
-        console.error('❌ Error cargando usuario:', error);
+      } else {
+        console.log('📝 Usuario no existe - creando perfil...');
         await crearUsuarioEnFirestore(firebaseUser);
       }
-    })();
-
-    try {
-      await dataLoadPromise.current;
-    } finally {
-      isLoadingUserData.current = false;
-      dataLoadPromise.current = null;
+    } catch (error) {
+      console.error('❌ Error cargando usuario:', error);
+      await crearUsuarioEnFirestore(firebaseUser);
     }
   };
 
@@ -192,6 +171,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setEmpresas([]);
       setEmpresaActual(null);
       setRolActual(null);
+      
+      // Setear solo cookie de auth, sin empresa
+      await setCookies(firebaseUser, null);
     } catch (error) {
       console.error('❌ Error creando usuario:', error);
       throw error;
@@ -232,12 +214,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('✅ Empresas cargadas:', empresasData.length);
       setEmpresas(empresasData);
 
-      // Establecer empresa actual de forma segura
+      // Establecer empresa actual
       if (empresasData.length > 0) {
         let empresaActiva = empresasData[0];
         
-        // Solo acceder a localStorage si estamos en el cliente
-        if (isMounted && typeof window !== 'undefined') {
+        // Intentar cargar desde localStorage
+        if (typeof window !== 'undefined') {
           const empresaGuardada = localStorage.getItem('empresaActual');
           if (empresaGuardada) {
             const empresaEncontrada = empresasData.find(e => e.id === empresaGuardada);
@@ -251,10 +233,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const rolEmpresa = userData.empresas.find(e => e.empresaId === empresaActiva.id);
         setRolActual(rolEmpresa?.rol || null);
         
-        // Guardar en localStorage solo en el cliente
-        if (isMounted && typeof window !== 'undefined') {
+        // Guardar en localStorage
+        if (typeof window !== 'undefined') {
           localStorage.setItem('empresaActual', empresaActiva.id);
         }
+        
+        // ✅ SETEAR COOKIES CON EMPRESA
+        await setCookies(auth.currentUser, empresaActiva);
         
         console.log('✅ Empresa actual establecida:', empresaActiva.nombre);
       }
@@ -266,12 +251,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Listener de autenticación - solo se ejecuta después del mount
+  // Listener de autenticación
   useEffect(() => {
-    if (!isMounted || authSetup.current) return;
-    
     console.log('🔄 Configurando listener de autenticación...');
-    authSetup.current = true;
     
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log('🔄 Auth state changed:', !!firebaseUser);
@@ -291,10 +273,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           console.log('👋 Usuario deslogueado');
           limpiarEstado();
+          await setCookies(null, null);
         }
       } catch (error) {
         console.error('❌ Error en auth state change:', error);
         limpiarEstado();
+        await setCookies(null, null);
       } finally {
         setLoading(false);
         setInitialized(true);
@@ -305,9 +289,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       console.log('🔄 Limpiando listener de auth');
       unsubscribe();
-      authSetup.current = false;
     };
-  }, [isMounted, limpiarEstado]);
+  }, [limpiarEstado, setCookies]);
 
   // Funciones de autenticación
   const signIn = async (email: string, password: string): Promise<void> => {
@@ -336,9 +319,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     console.log('👋 Cerrando sesión...');
-    if (isMounted && typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
       localStorage.removeItem('empresaActual');
     }
+    await setCookies(null, null);
     await signOut(auth);
   };
 
@@ -358,11 +342,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const rolEmpresa = usuario.empresas.find(e => e.empresaId === empresaId);
       setRolActual(rolEmpresa?.rol || null);
       
-      if (isMounted && typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
         localStorage.setItem('empresaActual', empresaId);
       }
+      
+      // ✅ ACTUALIZAR COOKIE DE EMPRESA
+      await setCookies(auth.currentUser, empresa);
     }
-  }, [empresas, usuario, isMounted]);
+  }, [empresas, usuario, setCookies]);
 
   const actualizarPerfil = useCallback(async (data: Partial<Usuario>) => {
     if (!user || !usuario) return;
@@ -390,33 +377,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Evitar recargas duplicadas
-    if (reloadPromise.current) {
-      console.log('⏳ Recarga ya en progreso, esperando...');
-      return reloadPromise.current;
-    }
-
     console.log('🔄 Recargando datos del usuario...');
+    setLoading(true);
     
-    reloadPromise.current = (async () => {
-      try {
-        // Forzar recarga de datos
-        lastUserLoaded.current = '';
-        isLoadingUserData.current = false;
-        dataLoadPromise.current = null;
-        
-        await cargarDatosUsuario(auth.currentUser!, true);
-        console.log('✅ Recarga de usuario completada');
-      } catch (error) {
-        console.error('❌ Error recargando usuario:', error);
-        throw error;
-      }
-    })();
-
     try {
-      await reloadPromise.current;
+      await cargarDatosUsuario(auth.currentUser);
+      console.log('✅ Recarga de usuario completada');
+    } catch (error) {
+      console.error('❌ Error recargando usuario:', error);
+      throw error;
     } finally {
-      reloadPromise.current = null;
+      setLoading(false);
     }
   }, [user]);
 
