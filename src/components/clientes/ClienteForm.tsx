@@ -1,4 +1,4 @@
-// src/components/clientes/ClienteForm.tsx
+// src/components/clientes/ClienteForm.tsx - CORREGIDO
 'use client'
 
 import { useState } from 'react'
@@ -45,7 +45,7 @@ import { Cliente, Referencia } from '@/types/database'
 import { useAuth } from '@/context/AuthContext'
 import { toast } from '@/hooks/use-toast'
 
-// Schema de validación
+// ✅ SCHEMA CORREGIDO - campos opcionales manejados correctamente
 const referenciaSchema = z.object({
   nombre: z.string().min(2, 'Nombre debe tener al menos 2 caracteres'),
   telefono: z.string().min(8, 'Teléfono debe tener al menos 8 dígitos'),
@@ -57,13 +57,13 @@ const clienteSchema = z.object({
   apellido: z.string().min(2, 'Apellido debe tener al menos 2 caracteres'),
   cedula: z.string().min(5, 'Cédula debe tener al menos 5 caracteres'),
   telefono: z.string().min(8, 'Teléfono debe tener al menos 8 dígitos'),
-  telefonoSecundario: z.string().optional(),
+  telefonoSecundario: z.string().optional().or(z.literal('')),
   email: z.string().email('Email inválido').optional().or(z.literal('')),
   direccion: z.string().min(10, 'Dirección debe tener al menos 10 caracteres'),
   estadoCivil: z.string().min(1, 'Selecciona un estado civil'),
   ocupacion: z.string().min(2, 'Ocupación debe tener al menos 2 caracteres'),
   ingresosMensuales: z.number().min(1, 'Ingresos deben ser mayor a 0'),
-  observaciones: z.string().optional(),
+  observaciones: z.string().optional().or(z.literal('')),
   referencias: z.array(referenciaSchema).min(1, 'Debe agregar al menos una referencia'),
 })
 
@@ -131,11 +131,11 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
     ).length || 0
     score += Math.min(validRefs * 10, 20)
     
-    // Email (5 puntos)
-    if (watchedFields.email) score += 5
+    // Email (5 puntos) - solo si no es string vacío
+    if (watchedFields.email && watchedFields.email.trim() !== '') score += 5
     
-    // Teléfono secundario (5 puntos)
-    if (watchedFields.telefonoSecundario) score += 5
+    // Teléfono secundario (5 puntos) - solo si no es string vacío
+    if (watchedFields.telefonoSecundario && watchedFields.telefonoSecundario.trim() !== '') score += 5
     
     // Estado civil estable (10 puntos)
     if (watchedFields.estadoCivil === 'Casado' || watchedFields.estadoCivil === 'Unión libre') {
@@ -155,28 +155,44 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
     setIsLoading(true)
     
     try {
+      console.log('📝 Datos del formulario:', data)
+      
       // Generar código único si es nuevo cliente
       const codigo = cliente?.codigo || `CLI${String(Date.now()).slice(-6)}`
       
+      // ✅ PREPARAR DATOS LIMPIANDO CAMPOS OPCIONALES
       const clienteData: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'> = {
         codigo,
-        nombre: data.nombre,
-        apellido: data.apellido,
-        cedula: data.cedula,
-        telefono: data.telefono,
-        telefonoSecundario: data.telefonoSecundario,
-        email: data.email || undefined,
-        direccion: data.direccion,
-        referencias: data.referencias,
+        nombre: data.nombre.trim(),
+        apellido: data.apellido.trim(),
+        cedula: data.cedula.trim(),
+        telefono: data.telefono.trim(),
+        // ✅ Solo incluir si no está vacío
+        ...(data.telefonoSecundario && data.telefonoSecundario.trim() && {
+          telefonoSecundario: data.telefonoSecundario.trim()
+        }),
+        // ✅ Solo incluir email si no está vacío y es válido
+        ...(data.email && data.email.trim() && data.email.includes('@') && {
+          email: data.email.trim()
+        }),
+        direccion: data.direccion.trim(),
+        referencias: data.referencias.filter(ref => 
+          ref.nombre.trim() && ref.telefono.trim() && ref.relacion.trim()
+        ),
         estadoCivil: data.estadoCivil,
-        ocupacion: data.ocupacion,
+        ocupacion: data.ocupacion.trim(),
         ingresosMensuales: data.ingresosMensuales,
         foto: cliente?.foto,
         documentos: cliente?.documentos || [],
         creditScore: calculateCreditScore(),
-        observaciones: data.observaciones,
+        // ✅ Solo incluir observaciones si no está vacío
+        ...(data.observaciones && data.observaciones.trim() && {
+          observaciones: data.observaciones.trim()
+        }),
         estado: cliente?.estado || 'activo'
       }
+      
+      console.log('✨ Datos preparados para enviar:', clienteData)
       
       await onSave(clienteData)
       
@@ -188,6 +204,7 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
       reset()
       onClose()
     } catch (error: any) {
+      console.error('❌ Error en onSubmit:', error)
       toast({
         title: "Error",
         description: error.message || `Error al ${cliente ? 'actualizar' : 'crear'} el cliente`,
@@ -284,7 +301,10 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
 
                 <div className="space-y-2">
                   <Label htmlFor="estadoCivil">Estado Civil *</Label>
-                  <Select onValueChange={(value: string) => setValue('estadoCivil', value)}>
+                  <Select 
+                    onValueChange={(value: string) => setValue('estadoCivil', value)}
+                    defaultValue={cliente?.estadoCivil || ''}
+                  >
                     <SelectTrigger className={errors.estadoCivil ? 'border-red-500' : ''}>
                       <SelectValue placeholder="Selecciona estado civil" />
                     </SelectTrigger>
@@ -332,8 +352,9 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                   <Input
                     id="telefonoSecundario"
                     {...register('telefonoSecundario')}
-                    placeholder="Ej: +507 6000-5678"
+                    placeholder="Ej: +507 6000-5678 (opcional)"
                   />
+                  <p className="text-xs text-gray-500">Opcional - deja vacío si no aplica</p>
                 </div>
 
                 <div className="space-y-2">
@@ -342,9 +363,10 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                     id="email"
                     type="email"
                     {...register('email')}
-                    placeholder="Ej: maria@email.com"
+                    placeholder="Ej: maria@email.com (opcional)"
                     className={errors.email ? 'border-red-500' : ''}
                   />
+                  <p className="text-xs text-gray-500">Opcional - deja vacío si no aplica</p>
                   {errors.email && (
                     <p className="text-sm text-red-600">{errors.email.message}</p>
                   )}
@@ -527,7 +549,10 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
 
                     <div className="space-y-2">
                       <Label htmlFor={`referencias.${index}.relacion`}>Relación *</Label>
-                      <Select onValueChange={(value: string) => setValue(`referencias.${index}.relacion`, value)}>
+                      <Select 
+                        onValueChange={(value: string) => setValue(`referencias.${index}.relacion`, value)}
+                        defaultValue={cliente?.referencias?.[index]?.relacion || ''}
+                      >
                         <SelectTrigger className={errors.referencias?.[index]?.relacion ? 'border-red-500' : ''}>
                           <SelectValue placeholder="Selecciona relación" />
                         </SelectTrigger>
@@ -576,9 +601,10 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                 <Textarea
                   id="observaciones"
                   {...register('observaciones')}
-                  placeholder="Ej: Cliente confiable, puntual en pagos anteriores, tiene negocio propio..."
+                  placeholder="Ej: Cliente confiable, puntual en pagos anteriores, tiene negocio propio... (opcional)"
                   rows={4}
                 />
+                <p className="text-xs text-gray-500">Opcional - deja vacío si no aplica</p>
               </div>
             </CardContent>
           </Card>

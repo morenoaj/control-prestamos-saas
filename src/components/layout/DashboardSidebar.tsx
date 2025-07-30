@@ -31,12 +31,12 @@ const navigation = [
   },
   { 
     name: 'Clientes', 
-    href: '/dashboard/clientes', 
+    href: '/clientes', 
     icon: Users
   },
   { 
     name: 'Préstamos', 
-    href: '/dashboard/prestamos', 
+    href: '/prestamos', 
     icon: CreditCard
   },
   { 

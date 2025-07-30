@@ -1,4 +1,4 @@
-// src/hooks/useClientes.ts
+// src/hooks/useClientes.ts - CORREGIDO
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
@@ -30,6 +30,37 @@ interface UseClientesReturn {
   eliminarCliente: (id: string) => Promise<void>
   obtenerCliente: (id: string) => Cliente | undefined
   recargarClientes: () => Promise<void>
+}
+
+// ✅ FUNCIÓN PARA LIMPIAR DATOS ANTES DE ENVIAR A FIREBASE
+const limpiarDatosParaFirebase = (data: any): any => {
+  const cleaned: any = {}
+  
+  for (const [key, value] of Object.entries(data)) {
+    // Solo incluir campos que no sean undefined, null, o strings vacíos
+    if (value !== undefined && value !== null && value !== '') {
+      if (typeof value === 'object' && !Array.isArray(value)) {
+        // Si es un objeto, limpiarlo recursivamente
+        const cleanedObject = limpiarDatosParaFirebase(value)
+        if (Object.keys(cleanedObject).length > 0) {
+          cleaned[key] = cleanedObject
+        }
+      } else if (Array.isArray(value)) {
+        // Si es un array, limpiarlo también
+        const cleanedArray = value.map(item => 
+          typeof item === 'object' ? limpiarDatosParaFirebase(item) : item
+        ).filter(item => item !== undefined && item !== null && item !== '')
+        
+        if (cleanedArray.length > 0) {
+          cleaned[key] = cleanedArray
+        }
+      } else {
+        cleaned[key] = value
+      }
+    }
+  }
+  
+  return cleaned
 }
 
 export function useClientes(): UseClientesReturn {
@@ -102,7 +133,7 @@ export function useClientes(): UseClientesReturn {
     }
   }, [empresaActual?.id, getClientesCollection])
 
-  // Crear cliente
+  // ✅ CREAR CLIENTE - CORREGIDO
   const crearCliente = useCallback(async (
     clienteData: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'>
   ): Promise<string> => {
@@ -130,14 +161,20 @@ export function useClientes(): UseClientesReturn {
         throw new Error('Ya existe un cliente con esta cédula')
       }
 
-      // Crear el documento
+      // ✅ LIMPIAR DATOS ANTES DE CREAR EL DOCUMENTO
       const nuevoCliente = {
         ...clienteData,
         empresaId: empresaActual.id,
         fechaRegistro: serverTimestamp()
       }
 
-      const docRef = await addDoc(clientesRef, nuevoCliente)
+      // Limpiar datos para Firebase (remover undefined, null, strings vacíos)
+      const datosLimpios = limpiarDatosParaFirebase(nuevoCliente)
+      
+      console.log('🧹 Datos originales:', nuevoCliente)
+      console.log('✨ Datos limpios:', datosLimpios)
+
+      const docRef = await addDoc(clientesRef, datosLimpios)
       console.log('✅ Cliente creado con ID:', docRef.id)
       
       return docRef.id
@@ -147,7 +184,7 @@ export function useClientes(): UseClientesReturn {
     }
   }, [empresaActual?.id, getClientesCollection])
 
-  // Actualizar cliente
+  // ✅ ACTUALIZAR CLIENTE - CORREGIDO
   const actualizarCliente = useCallback(async (
     id: string, 
     clienteData: Partial<Cliente>
@@ -178,12 +215,17 @@ export function useClientes(): UseClientesReturn {
         }
       }
 
-      const clienteRef = doc(db, 'clientes', id)
-      await updateDoc(clienteRef, {
+      // ✅ LIMPIAR DATOS ANTES DE ACTUALIZAR
+      const datosParaActualizar = {
         ...clienteData,
-        // No actualizar campos del sistema
-        empresaId: empresaActual.id
-      })
+        empresaId: empresaActual.id // Mantener empresaId
+      }
+
+      const datosLimpios = limpiarDatosParaFirebase(datosParaActualizar)
+      console.log('🧹 Datos de actualización limpios:', datosLimpios)
+
+      const clienteRef = doc(db, 'clientes', id)
+      await updateDoc(clienteRef, datosLimpios)
       
       console.log('✅ Cliente actualizado:', id)
     } catch (error: any) {

@@ -1,4 +1,4 @@
-// src/app/(dashboard)/dashboard/clientes/page.tsx - VERSIÓN INTEGRADA
+// src/app/(dashboard)/dashboard/clientes/page.tsx - VERSIÓN INTEGRADA CORREGIDA
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
@@ -34,6 +34,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { ClienteForm } from '@/components/clientes/ClienteForm'
+import { ClienteDetails } from '@/components/clientes/ClienteDetails'
 import { 
   Users, 
   Plus, 
@@ -77,6 +78,7 @@ export default function ClientesPage() {
   const [scoreFilter, setScoreFilter] = useState<string>('todos')
   const [showClienteForm, setShowClienteForm] = useState(false)
   const [clienteEditando, setClienteEditando] = useState<Cliente | null>(null)
+  const [clienteViewing, setClienteViewing] = useState<Cliente | null>(null)
   const [clienteAEliminar, setClienteAEliminar] = useState<Cliente | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -152,6 +154,10 @@ export default function ClientesPage() {
     setShowClienteForm(true)
   }
 
+  const handleVerCliente = (cliente: Cliente) => {
+    setClienteViewing(cliente)
+  }
+
   const handleEditarCliente = (cliente: Cliente) => {
     setClienteEditando(cliente)
     setShowClienteForm(true)
@@ -176,7 +182,11 @@ export default function ClientesPage() {
       setClienteEditando(null)
     } catch (error: any) {
       console.error('Error guardando cliente:', error)
-      // El error ya se maneja en el hook useClientes
+      toast({
+        title: "Error",
+        description: error.message || `Error al ${clienteEditando ? 'actualizar' : 'crear'} el cliente`,
+        variant: "destructive"
+      })
     }
   }
 
@@ -526,7 +536,7 @@ export default function ClientesPage() {
                     <DropdownMenuContent align="end">
                       <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleVerCliente(cliente)}>
                         <Eye className="h-4 w-4 mr-2" />
                         Ver Detalles
                       </DropdownMenuItem>
@@ -561,6 +571,19 @@ export default function ClientesPage() {
         cliente={clienteEditando}
         onSave={handleGuardarCliente}
       />
+
+      {/* Modal de Detalles del Cliente */}
+      {clienteViewing && (
+        <ClienteDetails
+          cliente={clienteViewing}
+          isOpen={true}
+          onClose={() => setClienteViewing(null)}
+          onEdit={() => {
+            setClienteViewing(null)
+            handleEditarCliente(clienteViewing)
+          }}
+        />
+      )}
 
       {/* Dialog de Confirmación de Eliminación */}
       <AlertDialog 
