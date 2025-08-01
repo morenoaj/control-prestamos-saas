@@ -1,4 +1,4 @@
-// src/app/(dashboard)/dashboard/prestamos/page.tsx
+// src/app/(dashboard)/prestamos/page.tsx - COMPLETO SIN DEBUG INFO
 'use client'
 
 import { useState, useMemo } from 'react'
@@ -246,8 +246,6 @@ export default function PrestamosPage() {
     }
   }
 
-  // Helper function para manejar fechas de Firebase de forma segura - REMOVIDO (ahora usamos el de utils)
-
   if (error) {
     return (
       <div className="space-y-6">
@@ -270,23 +268,6 @@ export default function PrestamosPage() {
 
   return (
     <div className="space-y-6">
-      {/* Debug temporal - Solo en desarrollo */}
-      {process.env.NODE_ENV === 'development' && (
-        <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="p-4">
-            <h4 className="font-semibold text-blue-800 mb-2">Debug Info</h4>
-            <div className="text-sm text-blue-700">
-              <div>Préstamos raw: {prestamos.length}</div>
-              <div>Préstamos filtrados: {prestamosFiltrados.length}</div>
-              <div>Loading: {loading.toString()}</div>
-              <div>Error: {error || 'null'}</div>
-              <div>Search: "{searchTerm}"</div>
-              <div>Status Filter: {statusFilter}</div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>

@@ -41,7 +41,7 @@ const navigation = [
   },
   { 
     name: 'Pagos', 
-    href: '/dashboard/pagos', 
+    href: '/pagos', 
     icon: DollarSign
   },
   { 
