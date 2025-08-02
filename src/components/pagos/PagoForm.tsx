@@ -1,18 +1,11 @@
-// src/components/pagos/PagoForm.tsx - ACTUALIZADO
+// src/components/forms/PagoForm.tsx - SIN USAR HOOK usePagos
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { usePrestamos } from '@/hooks/usePrestamos'
-import { useClientes } from '@/hooks/useClientes'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Select,
   SelectContent,
@@ -28,686 +21,404 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { 
-  DollarSign, 
-  Calendar, 
-  CreditCard, 
-  Calculator,
-  Save,
-  X,
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  FileText,
-  Receipt
-} from 'lucide-react'
-import { Prestamo, Cliente } from '@/types/database'
-import { formatCurrency, convertirFecha } from '@/lib/utils'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import { Calendar, CreditCard, DollarSign, User, Loader2, Calculator } from 'lucide-react'
+import { formatCurrency } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 
-// Tipos locales para evitar importaciones problemáticas
-interface PagoFormData {
-  prestamoId: string
-  montoPagado: number
-  metodoPago: string
-  referenciaPago?: string
-  fechaPago: Date
-  observaciones?: string
-}
-
-interface CalculoPago {
-  montoCapitalPendiente: number
-  montoInteresesPendientes: number
-  montoMoraPendiente: number
-  totalPendiente: number
-  diasAtraso: number
-  tasaMora: number
-  fechaProximoPago: Date
-  montoProximoPago: number
-}
-
-const pagoSchema = z.object({
-  prestamoId: z.string().min(1, 'Debe seleccionar un préstamo'),
-  montoPagado: z.number().min(0.01, 'El monto debe ser mayor a 0'),
-  metodoPago: z.string().min(1, 'Selecciona un método de pago'),
-  referenciaPago: z.string().optional().or(z.literal('')),
-  fechaPago: z.date(),
-  observaciones: z.string().optional().or(z.literal('')),
-})
-
-type PagoFormSchemaData = z.infer<typeof pagoSchema>
-
 interface PagoFormProps {
-  isOpen: boolean
-  onClose: () => void
-  prestamo?: Prestamo | null
-  cliente?: Cliente | null
-  onSave: (pago: PagoFormData) => Promise<void>
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  prestamos: Array<{
+    id: string
+    numero: string
+    clienteNombre: string
+    saldoCapital: number
+    interesesPendientes: number
+    moraAcumulada: number
+    montoProximoPago: number
+    fechaProximoPago?: Date | null
+    estado: string
+  }>
+  onSuccess?: () => void
+  onPagoRegistrado: (
+    prestamoId: string,
+    montoPagado: number,
+    metodoPago: string,
+    referenciaPago?: string,
+    observaciones?: string
+  ) => Promise<void>
 }
 
-// Función para calcular días de atraso
-const calcularDiasAtraso = (fechaVencimiento: Date): number => {
-  const hoy = new Date()
-  const diferencia = hoy.getTime() - fechaVencimiento.getTime()
-  const dias = Math.ceil(diferencia / (1000 * 60 * 60 * 24))
-  return Math.max(0, dias)
-}
+export function PagoForm({ 
+  open, 
+  onOpenChange, 
+  prestamos, 
+  onSuccess,
+  onPagoRegistrado 
+}: PagoFormProps) {
+  // Estados del formulario
+  const [prestamoSeleccionado, setPrestamoSeleccionado] = useState('')
+  const [montoPagado, setMontoPagado] = useState('')
+  const [metodoPago, setMetodoPago] = useState('')
+  const [referenciaPago, setReferenciaPago] = useState('')
+  const [observaciones, setObservaciones] = useState('')
+  const [procesandoPago, setProcesandoPago] = useState(false)
 
-// Función para calcular mora
-const calcularMora = (saldoPendiente: number, diasAtraso: number, tasaMora: number = 2): number => {
-  if (diasAtraso <= 0) return 0
-  return saldoPendiente * (tasaMora / 100) * (diasAtraso / 30) // Mora mensual prorrateada
-}
-
-export function PagoForm({ isOpen, onClose, prestamo: prestamoInicial, cliente: clienteInicial, onSave }: PagoFormProps) {
-  const { prestamos } = usePrestamos()
-  const { clientes } = useClientes()
-  const [isLoading, setIsLoading] = useState(false)
-  const [calculoPago, setCalculoPago] = useState<CalculoPago | null>(null)
-  const [loadingCalculo, setLoadingCalculo] = useState(false)
-  const [prestamoSeleccionado, setPrestamoSeleccionado] = useState<Prestamo | null>(prestamoInicial || null)
-  const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(clienteInicial || null)
-
-  const {
-    register,
-    handleSubmit,
-    watch,
-    setValue,
-    reset,
-    formState: { errors },
-  } = useForm<PagoFormSchemaData>({
-    resolver: zodResolver(pagoSchema),
-    defaultValues: {
-      prestamoId: prestamoInicial?.id || '',
-      montoPagado: 0,
-      metodoPago: '',
-      referenciaPago: '',
-      fechaPago: new Date(),
-      observaciones: '',
-    }
-  })
-
-  // Observar cambios en el monto para calcular distribución
-  const watchedMonto = watch('montoPagado')
-  const watchedPrestamoId = watch('prestamoId')
-
-  // Actualizar préstamo y cliente cuando cambia la selección
-  useEffect(() => {
-    if (watchedPrestamoId) {
-      const prestamo = prestamos.find(p => p.id === watchedPrestamoId)
-      const cliente = prestamo ? clientes.find(c => c.id === prestamo.clienteId) : null
-      setPrestamoSeleccionado(prestamo || null)
-      setClienteSeleccionado(cliente || null)
-    }
-  }, [watchedPrestamoId, prestamos, clientes])
-
-  // Cargar cálculo de pagos pendientes cuando se selecciona un préstamo
-  useEffect(() => {
-    if (prestamoSeleccionado?.id) {
-      setLoadingCalculo(true)
-      
-      // Calcular valores directamente del préstamo
-      const fechaVencimiento = convertirFecha(prestamoSeleccionado.fechaVencimiento)
-      const diasAtraso = calcularDiasAtraso(fechaVencimiento)
-      const moraPendiente = calcularMora(prestamoSeleccionado.saldoCapital, diasAtraso)
-      
-      const calculo: CalculoPago = {
-        montoCapitalPendiente: prestamoSeleccionado.saldoCapital,
-        montoInteresesPendientes: prestamoSeleccionado.interesesPendientes,
-        montoMoraPendiente: moraPendiente,
-        totalPendiente: prestamoSeleccionado.saldoCapital + prestamoSeleccionado.interesesPendientes + moraPendiente,
-        diasAtraso,
-        tasaMora: 2, // 2% mensual
-        fechaProximoPago: convertirFecha(prestamoSeleccionado.fechaProximoPago),
-        montoProximoPago: prestamoSeleccionado.montoProximoPago
-      }
-      
-      setCalculoPago(calculo)
-      setLoadingCalculo(false)
-    }
-  }, [prestamoSeleccionado])
-
-  // Reset form when modal opens/closes
-  useEffect(() => {
-    if (isOpen) {
-      setPrestamoSeleccionado(prestamoInicial || null)
-      setClienteSeleccionado(clienteInicial || null)
-      reset({
-        prestamoId: prestamoInicial?.id || '',
-        montoPagado: 0,
-        metodoPago: '',
-        referenciaPago: '',
-        fechaPago: new Date(),
-        observaciones: '',
-      })
-    }
-  }, [isOpen, prestamoInicial, clienteInicial, reset])
+  // Datos del préstamo seleccionado
+  const prestamo = prestamos.find(p => p.id === prestamoSeleccionado)
 
   // Calcular distribución del pago
   const calcularDistribucion = (monto: number) => {
-    if (!calculoPago || monto <= 0) return null
+    if (!prestamo || monto <= 0) {
+      return { montoMora: 0, montoIntereses: 0, montoCapital: 0, sobrante: 0 }
+    }
 
     let montoRestante = monto
-    let montoMora = 0
-    let montoIntereses = 0
-    let montoCapital = 0
-    let montoExcedente = 0
-
-    // 1. Mora (prioridad más alta)
-    if (calculoPago.montoMoraPendiente > 0 && montoRestante > 0) {
-      montoMora = Math.min(montoRestante, calculoPago.montoMoraPendiente)
-      montoRestante -= montoMora
-    }
-
-    // 2. Intereses
-    if (calculoPago.montoInteresesPendientes > 0 && montoRestante > 0) {
-      montoIntereses = Math.min(montoRestante, calculoPago.montoInteresesPendientes)
-      montoRestante -= montoIntereses
-    }
-
-    // 3. Capital
-    if (calculoPago.montoCapitalPendiente > 0 && montoRestante > 0) {
-      montoCapital = Math.min(montoRestante, calculoPago.montoCapitalPendiente)
-      montoRestante -= montoCapital
-    }
-
-    // 4. Excedente
-    if (montoRestante > 0) {
-      montoExcedente = montoRestante
-    }
+    
+    // 1. Pagar mora primero (con verificación)
+    const montoMora = Math.min(montoRestante, prestamo.moraAcumulada || 0)
+    montoRestante -= montoMora
+    
+    // 2. Pagar intereses (con verificación)
+    const montoIntereses = Math.min(montoRestante, prestamo.interesesPendientes || 0)
+    montoRestante -= montoIntereses
+    
+    // 3. Pagar capital (con verificación)
+    const montoCapital = Math.min(montoRestante, prestamo.saldoCapital || 0)
+    montoRestante -= montoCapital
 
     return {
       montoMora,
       montoIntereses,
       montoCapital,
-      montoExcedente,
-      nuevoSaldoCapital: calculoPago.montoCapitalPendiente - montoCapital,
-      nuevosInteresesPendientes: calculoPago.montoInteresesPendientes - montoIntereses,
-      nuevaMoraPendiente: calculoPago.montoMoraPendiente - montoMora
+      sobrante: montoRestante
     }
   }
 
-  const distribucion = calcularDistribucion(watchedMonto || 0)
+  const distribucion = calcularDistribucion(parseFloat(montoPagado) || 0)
 
-  const onSubmit = async (data: PagoFormSchemaData) => {
-    if (!prestamoSeleccionado || !calculoPago) {
+  // Limpiar formulario
+  const limpiarFormulario = () => {
+    setPrestamoSeleccionado('')
+    setMontoPagado('')
+    setMetodoPago('')
+    setReferenciaPago('')
+    setObservaciones('')
+  }
+
+  // Manejar envío del formulario
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!prestamoSeleccionado || !montoPagado || !metodoPago) {
       toast({
-        title: "Error",
-        description: "No se puede procesar el pago sin información del préstamo",
+        title: "Campos requeridos",
+        description: "Por favor completa todos los campos obligatorios",
         variant: "destructive"
       })
       return
     }
 
-    setIsLoading(true)
-    
-    try {
-      const pagoData: PagoFormData = {
-        prestamoId: data.prestamoId,
-        montoPagado: data.montoPagado,
-        metodoPago: data.metodoPago,
-        referenciaPago: data.referenciaPago || undefined,
-        fechaPago: data.fechaPago,
-        observaciones: data.observaciones || undefined,
-      }
-      
-      await onSave(pagoData)
-      
+    const monto = parseFloat(montoPagado)
+    if (monto <= 0) {
       toast({
-        title: "Pago registrado",
-        description: `Pago de ${formatCurrency(data.montoPagado)} registrado correctamente`,
+        title: "Monto inválido",
+        description: "El monto del pago debe ser mayor a cero",
+        variant: "destructive"
       })
-      
-      reset()
-      onClose()
-    } catch (error: any) {
-      console.error('❌ Error en onSubmit de pago:', error)
+      return
+    }
+
+    setProcesandoPago(true)
+
+    try {
+      await onPagoRegistrado(
+        prestamoSeleccionado,
+        monto,
+        metodoPago,
+        referenciaPago.trim() || undefined,
+        observaciones.trim() || undefined
+      )
+
       toast({
-        title: "Error",
-        description: error.message || "Error al registrar el pago",
+        title: "¡Pago registrado exitosamente!",
+        description: `Se ha procesado el pago de ${formatCurrency(monto)}`,
+      })
+
+      limpiarFormulario()
+      onOpenChange(false)
+      onSuccess?.()
+
+    } catch (error: any) {
+      console.error('Error al registrar pago:', error)
+      toast({
+        title: "Error al registrar pago",
+        description: error.message || "Hubo un problema al procesar el pago",
         variant: "destructive"
       })
     } finally {
-      setIsLoading(false)
+      setProcesandoPago(false)
     }
   }
 
-  const handleClose = () => {
-    reset()
-    onClose()
-  }
-
-  const setPagoCompleto = () => {
-    if (calculoPago) {
-      setValue('montoPagado', calculoPago.totalPendiente)
-    }
-  }
-
-  const setPagoMinimo = () => {
-    if (calculoPago) {
-      // Pago mínimo: mora + intereses vencidos
-      const pagoMinimo = calculoPago.montoMoraPendiente + calculoPago.montoInteresesPendientes
-      setValue('montoPagado', Math.max(pagoMinimo, calculoPago.montoProximoPago))
-    }
-  }
-
-  // Filtrar solo préstamos activos
-  const prestamosActivos = prestamos.filter(p => p.estado === 'activo' || p.estado === 'atrasado')
+  // Filtrar préstamos activos
+  const prestamosDisponibles = prestamos.filter(p => 
+    p.estado === 'activo' || p.estado === 'atrasado'
+  )
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Receipt className="h-5 w-5" />
-            Registrar Pago
+            <DollarSign className="h-5 w-5" />
+            Registrar Nuevo Pago
           </DialogTitle>
           <DialogDescription>
-            Registra un nuevo pago para el préstamo seleccionado
+            Registra un pago para un préstamo existente. El sistema calculará automáticamente 
+            la distribución entre mora, intereses y capital.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Formulario Principal */}
-          <div className="lg:col-span-2 space-y-6">
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-              
-              {/* Selección de Préstamo (solo si no viene preseleccionado) */}
-              {!prestamoInicial && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CreditCard className="h-5 w-5" />
-                      Seleccionar Préstamo
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <Label htmlFor="prestamoId">Préstamo *</Label>
-                      <Select 
-                        onValueChange={(value: string) => setValue('prestamoId', value)}
-                        defaultValue=""
-                      >
-                        <SelectTrigger className={errors.prestamoId ? 'border-red-500' : ''}>
-                          <SelectValue placeholder="Selecciona un préstamo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {prestamosActivos.map((prestamo) => {
-                            const cliente = clientes.find(c => c.id === prestamo.clienteId)
-                            return (
-                              <SelectItem key={prestamo.id} value={prestamo.id}>
-                                <div className="flex flex-col">
-                                  <span className="font-medium">
-                                    {prestamo.numero} - {cliente ? `${cliente.nombre} ${cliente.apellido}` : 'Cliente no encontrado'}
-                                  </span>
-                                  <span className="text-sm text-gray-500">
-                                    Saldo: {formatCurrency(prestamo.saldoCapital)}
-                                  </span>
-                                </div>
-                              </SelectItem>
-                            )
-                          })}
-                        </SelectContent>
-                      </Select>
-                      {errors.prestamoId && (
-                        <p className="text-sm text-red-600">{errors.prestamoId.message}</p>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-              
-              {/* Información del Préstamo */}
-              {prestamoSeleccionado && clienteSeleccionado && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CreditCard className="h-5 w-5" />
-                      Información del Préstamo
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="font-medium text-gray-700">Préstamo:</span>
-                        <div className="font-semibold text-gray-900">{prestamoSeleccionado.numero}</div>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Selección de Préstamo */}
+          <div className="space-y-2">
+            <Label htmlFor="prestamo">Préstamo *</Label>
+            <Select value={prestamoSeleccionado} onValueChange={setPrestamoSeleccionado}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona un préstamo" />
+              </SelectTrigger>
+              <SelectContent>
+                {prestamosDisponibles.length === 0 ? (
+                  <SelectItem value="" disabled>
+                    No hay préstamos disponibles
+                  </SelectItem>
+                ) : (
+                  prestamosDisponibles.map((prestamo) => (
+                    <SelectItem key={prestamo.id} value={prestamo.id}>
+                      <div className="flex items-center justify-between w-full">
+                        <span>{prestamo.numero} - {prestamo.clienteNombre}</span>
+                        <Badge variant={prestamo.estado === 'atrasado' ? 'destructive' : 'default'}>
+                          {formatCurrency(prestamo.saldoCapital)}
+                        </Badge>
                       </div>
-                      <div>
-                        <span className="font-medium text-gray-700">Cliente:</span>
-                        <div className="font-semibold text-gray-900">
-                          {clienteSeleccionado.nombre} {clienteSeleccionado.apellido}
-                        </div>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-700">Monto Original:</span>
-                        <div className="font-semibold text-green-600">
-                          {formatCurrency(prestamoSeleccionado.monto)}
-                        </div>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-700">Saldo Actual:</span>
-                        <div className="font-semibold text-orange-600">
-                          {formatCurrency(prestamoSeleccionado.saldoCapital)}
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Detalles del Pago */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <DollarSign className="h-5 w-5" />
-                    Detalles del Pago
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="montoPagado">Monto Pagado (USD) *</Label>
-                      <Input
-                        id="montoPagado"
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        {...register('montoPagado', { valueAsNumber: true })}
-                        placeholder="0.00"
-                        className={errors.montoPagado ? 'border-red-500' : ''}
-                      />
-                      {errors.montoPagado && (
-                        <p className="text-sm text-red-600">{errors.montoPagado.message}</p>
-                      )}
-                      
-                      {/* Botones de pago rápido */}
-                      {calculoPago && (
-                        <div className="flex gap-2 mt-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={setPagoMinimo}
-                          >
-                            Pago Mínimo
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={setPagoCompleto}
-                          >
-                            Pago Total
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="fechaPago">Fecha del Pago *</Label>
-                      <Input
-                        id="fechaPago"
-                        type="date"
-                        {...register('fechaPago', { 
-                          valueAsDate: true,
-                          setValueAs: (value) => value ? new Date(value) : new Date()
-                        })}
-                        className={errors.fechaPago ? 'border-red-500' : ''}
-                        defaultValue={new Date().toISOString().split('T')[0]}
-                      />
-                      {errors.fechaPago && (
-                        <p className="text-sm text-red-600">{errors.fechaPago.message}</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="metodoPago">Método de Pago *</Label>
-                      <Select 
-                        onValueChange={(value: string) => setValue('metodoPago', value)}
-                        defaultValue=""
-                      >
-                        <SelectTrigger className={errors.metodoPago ? 'border-red-500' : ''}>
-                          <SelectValue placeholder="Selecciona método de pago" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="efectivo">
-                            <div className="flex items-center gap-2">
-                              <DollarSign className="h-4 w-4" />
-                              Efectivo
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="transferencia">
-                            <div className="flex items-center gap-2">
-                              <CreditCard className="h-4 w-4" />
-                              Transferencia Bancaria
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="cheque">
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4" />
-                              Cheque
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="yappy">Yappy</SelectItem>
-                          <SelectItem value="nequi">Nequi</SelectItem>
-                          <SelectItem value="otro">Otro</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {errors.metodoPago && (
-                        <p className="text-sm text-red-600">{errors.metodoPago.message}</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="referenciaPago">Referencia de Pago</Label>
-                      <Input
-                        id="referenciaPago"
-                        {...register('referenciaPago')}
-                        placeholder="Ej: Número de cheque, referencia de transferencia..."
-                      />
-                      <p className="text-xs text-gray-500">Opcional - deja vacío si no aplica</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="observaciones">Observaciones</Label>
-                    <Textarea
-                      id="observaciones"
-                      {...register('observaciones')}
-                      placeholder="Notas adicionales sobre este pago... (opcional)"
-                      rows={3}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            </form>
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Panel de Cálculos */}
-          <div className="lg:col-span-1">
-            <div className="sticky top-4 space-y-4">
-              {/* Estado del Préstamo */}
-              {loadingCalculo ? (
-                <Card>
-                  <CardContent className="p-6 text-center">
-                    <div className="flex items-center justify-center space-x-2">
-                      <Clock className="h-6 w-6 animate-spin text-blue-600" />
-                      <span className="text-gray-600">Calculando...</span>
+          {/* Información del Préstamo Seleccionado */}
+          {prestamo && (
+            <Card className="bg-gray-50">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  {prestamo.clienteNombre} - Préstamo {prestamo.numero}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-2">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-600">Saldo Capital:</span>
+                    <span className="font-semibold ml-2">
+                      {formatCurrency(prestamo.saldoCapital || 0)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Intereses:</span>
+                    <span className="font-semibold ml-2">
+                      {formatCurrency(prestamo.interesesPendientes || 0)}
+                    </span>
+                  </div>
+                  {(prestamo.moraAcumulada || 0) > 0 && (
+                    <div>
+                      <span className="text-red-600">Mora:</span>
+                      <span className="font-semibold ml-2 text-red-600">
+                        {formatCurrency(prestamo.moraAcumulada || 0)}
+                      </span>
                     </div>
-                  </CardContent>
-                </Card>
-              ) : calculoPago ? (
-                <Card className="border-2 border-blue-200 bg-blue-50">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-blue-800">
-                      <Calculator className="h-5 w-5" />
-                      Estado del Préstamo
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium text-gray-700">Capital Pendiente:</span>
-                        <span className="font-bold text-gray-900">
-                          {formatCurrency(calculoPago.montoCapitalPendiente)}
-                        </span>
-                      </div>
-                      
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium text-gray-700">Intereses Pendientes:</span>
-                        <span className="font-bold text-orange-600">
-                          {formatCurrency(calculoPago.montoInteresesPendientes)}
-                        </span>
-                      </div>
-                      
-                      {calculoPago.montoMoraPendiente > 0 && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium text-gray-700">Mora Pendiente:</span>
-                          <span className="font-bold text-red-600">
-                            {formatCurrency(calculoPago.montoMoraPendiente)}
-                          </span>
-                        </div>
-                      )}
-                      
-                      <div className="flex justify-between items-center py-2 border-t border-blue-200">
-                        <span className="text-sm font-medium text-gray-700">Total Pendiente:</span>
-                        <span className="text-xl font-bold text-blue-800">
-                          {formatCurrency(calculoPago.totalPendiente)}
-                        </span>
-                      </div>
+                  )}
+                  <div>
+                    <span className="text-gray-600">Próximo Pago:</span>
+                    <span className="font-semibold ml-2">
+                      {formatCurrency(prestamo.montoProximoPago || 0)}
+                    </span>
+                  </div>
+                </div>
+                <Badge 
+                  variant={prestamo.estado === 'atrasado' ? 'destructive' : 'default'}
+                  className="text-xs"
+                >
+                  {prestamo.estado.charAt(0).toUpperCase() + prestamo.estado.slice(1)}
+                </Badge>
+              </CardContent>
+            </Card>
+          )}
 
-                      {calculoPago.diasAtraso > 0 && (
-                        <Alert className="border-red-200 bg-red-50">
-                          <AlertCircle className="h-4 w-4 text-red-600" />
-                          <AlertDescription className="text-red-800">
-                            <strong>Préstamo atrasado:</strong> {calculoPago.diasAtraso} días
-                          </AlertDescription>
-                        </Alert>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ) : null}
-
-              {/* Distribución del Pago */}
-              {distribucion && watchedMonto > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Receipt className="h-5 w-5" />
-                      Distribución del Pago
-                    </CardTitle>
-                    <CardDescription>
-                      Cómo se aplicará el pago de {formatCurrency(watchedMonto)}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {distribucion.montoMora > 0 && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">A Mora:</span>
-                        <span className="font-semibold text-red-600">
-                          {formatCurrency(distribucion.montoMora)}
-                        </span>
-                      </div>
-                    )}
-                    
-                    {distribucion.montoIntereses > 0 && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">A Intereses:</span>
-                        <span className="font-semibold text-orange-600">
-                          {formatCurrency(distribucion.montoIntereses)}
-                        </span>
-                      </div>
-                    )}
-                    
-                    {distribucion.montoCapital > 0 && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">A Capital:</span>
-                        <span className="font-semibold text-green-600">
-                          {formatCurrency(distribucion.montoCapital)}
-                        </span>
-                      </div>
-                    )}
-                    
-                    {distribucion.montoExcedente > 0 && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-700">Excedente:</span>
-                        <span className="font-semibold text-blue-600">
-                          {formatCurrency(distribucion.montoExcedente)}
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="pt-3 border-t">
-                      <div className="text-sm text-gray-600 space-y-1">
-                        <div>Nuevo saldo capital: <strong>{formatCurrency(distribucion.nuevoSaldoCapital)}</strong></div>
-                        {distribucion.nuevoSaldoCapital <= 0 && (
-                          <Alert className="mt-2 border-green-200 bg-green-50">
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                            <AlertDescription className="text-green-800">
-                              ¡Este pago liquidará completamente el préstamo!
-                            </AlertDescription>
-                          </Alert>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Próximo Pago */}
-              {calculoPago && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Calendar className="h-5 w-5" />
-                      Información de Pagos
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="text-sm space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Próximo pago:</span>
-                        <span className="font-semibold">
-                          {formatCurrency(calculoPago.montoProximoPago)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Fecha:</span>
-                        <span className="font-semibold">
-                          {calculoPago.fechaProximoPago.toLocaleDateString('es-PA')}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Tasa mora:</span>
-                        <span className="font-semibold">{calculoPago.tasaMora}% mensual</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+          {/* Monto del Pago */}
+          <div className="space-y-2">
+            <Label htmlFor="monto">Monto del Pago *</Label>
+            <div className="relative">
+              <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              <Input
+                id="monto"
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="0.00"
+                value={montoPagado}
+                onChange={(e) => setMontoPagado(e.target.value)}
+                className="pl-10"
+              />
             </div>
           </div>
-        </div>
 
-        <DialogFooter className="border-t pt-6">
-          <Button type="button" variant="outline" onClick={handleClose}>
-            <X className="h-4 w-4 mr-2" />
-            Cancelar
-          </Button>
-          <Button 
-            onClick={handleSubmit(onSubmit)} 
-            disabled={isLoading || !prestamoSeleccionado || !calculoPago || !watchedMonto || watchedMonto <= 0}
-            className="bg-green-600 hover:bg-green-700"
-          >
-            {isLoading ? (
-              <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <Save className="h-4 w-4 mr-2" />
-            )}
-            Registrar Pago
-          </Button>
-        </DialogFooter>
+          {/* Distribución del Pago */}
+          {montoPagado && prestamo && parseFloat(montoPagado) > 0 && (
+            <Card className="bg-blue-50 border-blue-200">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Calculator className="h-4 w-4" />
+                  Distribución del Pago
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-2 text-sm">
+                  {distribucion.montoMora > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-red-600">Mora:</span>
+                      <span className="font-semibold text-red-600">
+                        {formatCurrency(distribucion.montoMora)}
+                      </span>
+                    </div>
+                  )}
+                  {distribucion.montoIntereses > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-yellow-600">Intereses:</span>
+                      <span className="font-semibold text-yellow-600">
+                        {formatCurrency(distribucion.montoIntereses)}
+                      </span>
+                    </div>
+                  )}
+                  {distribucion.montoCapital > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-green-600">Capital:</span>
+                      <span className="font-semibold text-green-600">
+                        {formatCurrency(distribucion.montoCapital)}
+                      </span>
+                    </div>
+                  )}
+                  {distribucion.sobrante > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-blue-600">Sobrante:</span>
+                      <span className="font-semibold text-blue-600">
+                        {formatCurrency(distribucion.sobrante)}
+                      </span>
+                    </div>
+                  )}
+                  <Separator />
+                  <div className="flex justify-between font-semibold">
+                    <span>Total:</span>
+                    <span>{formatCurrency(parseFloat(montoPagado))}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Método de Pago */}
+          <div className="space-y-2">
+            <Label htmlFor="metodo">Método de Pago *</Label>
+            <Select value={metodoPago} onValueChange={setMetodoPago}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona método de pago" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="efectivo">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="h-4 w-4" />
+                    Efectivo
+                  </div>
+                </SelectItem>
+                <SelectItem value="transferencia">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-4 w-4" />
+                    Transferencia Bancaria
+                  </div>
+                </SelectItem>
+                <SelectItem value="cheque">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4" />
+                    Cheque
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Referencia de Pago */}
+          {(metodoPago === 'transferencia' || metodoPago === 'cheque') && (
+            <div className="space-y-2">
+              <Label htmlFor="referencia">
+                Referencia {metodoPago === 'cheque' ? '(Número de Cheque)' : '(Número de Transacción)'}
+              </Label>
+              <Input
+                id="referencia"
+                placeholder={
+                  metodoPago === 'cheque' 
+                    ? "Ej: CHK-001234" 
+                    : "Ej: TRF-987654321"
+                }
+                value={referenciaPago}
+                onChange={(e) => setReferenciaPago(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Observaciones */}
+          <div className="space-y-2">
+            <Label htmlFor="observaciones">Observaciones</Label>
+            <Textarea
+              id="observaciones"
+              placeholder="Notas adicionales del pago (opcional)"
+              value={observaciones}
+              onChange={(e) => setObservaciones(e.target.value)}
+              rows={3}
+            />
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={procesandoPago}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={procesandoPago || !prestamoSeleccionado || !montoPagado || !metodoPago}
+            >
+              {procesandoPago ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Procesando Pago...
+                </>
+              ) : (
+                <>
+                  <DollarSign className="h-4 w-4 mr-2" />
+                  Registrar Pago
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

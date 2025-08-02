@@ -1,17 +1,23 @@
-// src/app/(dashboard)/pagos/page.tsx - PASO 2 + usePagos SIMPLIFICADO
+// src/app/(dashboard)/pagos/page.tsx - CON FUNCIÓN DE REGISTRO DIRECTA
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useClientes } from '@/hooks/useClientes'
 import { usePrestamos } from '@/hooks/usePrestamos'
+import { PagoForm } from '@/components/pagos/PagoForm' // Importa el formulario de pagos
 import { 
   collection, 
   query, 
   where, 
   orderBy, 
   onSnapshot,
-  Timestamp
+  Timestamp,
+  doc,
+  addDoc,
+  serverTimestamp,
+  writeBatch,
+  getDoc
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
@@ -82,193 +88,335 @@ interface PagoSimple {
   fechaPago: Timestamp
   fechaRegistro: Timestamp
   observaciones?: string
-  estado: string
+  usuarioRegistro: string
 }
 
 export default function PagosPage() {
-  // ✅ Hooks que funcionan
-  const { empresaActual, usuario } = useAuth()
-  const { clientes, loading: loadingClientes } = useClientes()
-  const { prestamos, loading: loadingPrestamos } = usePrestamos()
+  const { empresaActual, user } = useAuth()
+  const { clientes } = useClientes()
+  const { prestamos } = usePrestamos()
   
-  // ✅ Hook simplificado para pagos (directamente en el componente)
+  // Estados locales
   const [pagos, setPagos] = useState<PagoSimple[]>([])
-  const [loadingPagos, setLoadingPagos] = useState(true)
-  const [errorPagos, setErrorPagos] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  
+  // Estados del formulario y filtros
+  const [showPagoForm, setShowPagoForm] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [metodoPagoFilter, setMetodoPagoFilter] = useState('todos')
+  const [estadoFilter, setEstadoFilter] = useState('todos')
+  const [pagoAEliminar, setPagoAEliminar] = useState<PagoSimple | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
-  // ✅ Cargar pagos directamente en el componente
+  // ✅ Función para limpiar datos antes de enviar a Firebase
+  const limpiarDatosParaFirebase = (data: any): any => {
+    const cleaned: any = {}
+    
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined && value !== null && value !== '') {
+        if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+          const cleanedObject = limpiarDatosParaFirebase(value)
+          if (Object.keys(cleanedObject).length > 0) {
+            cleaned[key] = cleanedObject
+          }
+        } else {
+          cleaned[key] = value
+        }
+      }
+    }
+    
+    return cleaned
+  }
+
+  // ✅ Función para generar número de pago único
+  const generarNumeroPago = async (empresaId: string): Promise<string> => {
+    const fecha = new Date()
+    const año = fecha.getFullYear().toString().slice(-2)
+    const mes = (fecha.getMonth() + 1).toString().padStart(2, '0')
+    const timestamp = Date.now().toString().slice(-6)
+    
+    return `PAG${año}${mes}${timestamp}`
+  }
+
+  // ✅ Función para distribuir el pago entre capital e intereses
+  const distribuirPago = (
+    montoPagado: number,
+    saldoCapital: number,
+    interesesPendientes: number,
+    moraAcumulada: number
+  ) => {
+    let montoRestante = montoPagado
+    
+    // 1. Pagar mora primero
+    const montoMora = Math.min(montoRestante, moraAcumulada)
+    montoRestante -= montoMora
+    
+    // 2. Pagar intereses
+    const montoIntereses = Math.min(montoRestante, interesesPendientes)
+    montoRestante -= montoIntereses
+    
+    // 3. El resto va a capital
+    const montoCapital = Math.min(montoRestante, saldoCapital)
+    
+    return {
+      montoMora,
+      montoIntereses,
+      montoCapital
+    }
+  }
+
+  // ✅ Función principal para registrar pagos
+  const procesarPagoAutomatico = useCallback(async (
+    prestamoId: string,
+    montoPagado: number,
+    metodoPago: string,
+    referenciaPago?: string,
+    observaciones?: string
+  ): Promise<void> => {
+    if (!empresaActual?.id || !user?.uid) {
+      throw new Error('No hay empresa o usuario seleccionado')
+    }
+
+    try {
+      console.log('💳 Procesando pago automático para préstamo:', prestamoId)
+
+      // Obtener datos del préstamo
+      const prestamoDoc = await getDoc(doc(db, 'prestamos', prestamoId))
+      if (!prestamoDoc.exists()) {
+        throw new Error('El préstamo no existe')
+      }
+
+      const prestamo = { id: prestamoDoc.id, ...prestamoDoc.data() } as any
+
+      // Distribuir el pago - con verificaciones de tipo
+      const distribucion = distribuirPago(
+        montoPagado,
+        prestamo.saldoCapital || 0,
+        prestamo.interesesPendientes || 0,
+        prestamo.moraAcumulada || 0
+      )
+
+      // Crear el registro de pago
+      const numero = await generarNumeroPago(empresaActual.id)
+      
+      const pagoData = {
+        empresaId: empresaActual.id,
+        numero,
+        prestamoId,
+        clienteId: prestamo.clienteId,
+        usuarioRegistro: user.uid,
+        montoPagado,
+        montoCapital: distribucion.montoCapital,
+        montoIntereses: distribucion.montoIntereses,
+        montoMora: distribucion.montoMora,
+        metodoPago,
+        fechaPago: new Date(),
+        fechaRegistro: serverTimestamp(),
+        ...(referenciaPago && { referenciaPago }),
+        ...(observaciones && { observaciones })
+      }
+
+      // Usar batch para operaciones atómicas
+      const batch = writeBatch(db)
+      
+      // Crear el pago
+      const pagoRef = doc(collection(db, 'pagos'))
+      batch.set(pagoRef, limpiarDatosParaFirebase(pagoData))
+
+      // Actualizar el préstamo - con verificaciones de tipo
+      const nuevoSaldoCapital = (prestamo.saldoCapital || 0) - distribucion.montoCapital
+      const nuevosInteresesPendientes = (prestamo.interesesPendientes || 0) - distribucion.montoIntereses
+      const nuevaMoraAcumulada = (prestamo.moraAcumulada || 0) - distribucion.montoMora
+      const nuevosInteresesPagados = (prestamo.interesesPagados || 0) + distribucion.montoIntereses
+
+      // Calcular próximo pago
+      const fechaProximoPago = new Date()
+      switch (prestamo.tipoTasa || 'mensual') {
+        case 'quincenal':
+          fechaProximoPago.setDate(fechaProximoPago.getDate() + 15)
+          break
+        case 'mensual':
+          fechaProximoPago.setMonth(fechaProximoPago.getMonth() + 1)
+          break
+        case 'anual':
+          fechaProximoPago.setFullYear(fechaProximoPago.getFullYear() + 1)
+          break
+      }
+
+      // Determinar nuevo estado
+      let nuevoEstado = prestamo.estado || 'activo'
+      if (nuevoSaldoCapital <= 0) {
+        nuevoEstado = 'finalizado'
+      } else if (prestamo.estado === 'atrasado' && distribucion.montoMora > 0) {
+        nuevoEstado = 'activo' // Si pagó mora, vuelve a activo
+      }
+
+      const prestamoActualizado = {
+        saldoCapital: Math.max(0, nuevoSaldoCapital),
+        interesesPendientes: Math.max(0, nuevosInteresesPendientes),
+        interesesPagados: nuevosInteresesPagados,
+        moraAcumulada: Math.max(0, nuevaMoraAcumulada),
+        diasAtraso: distribucion.montoMora > 0 ? 0 : (prestamo.diasAtraso || 0),
+        fechaProximoPago: nuevoEstado === 'finalizado' ? null : fechaProximoPago,
+        montoProximoPago: nuevoEstado === 'finalizado' ? 0 : (prestamo.montoProximoPago || 0),
+        estado: nuevoEstado
+      }
+
+      const prestamoRef = doc(db, 'prestamos', prestamoId)
+      batch.update(prestamoRef, limpiarDatosParaFirebase(prestamoActualizado))
+
+      // Ejecutar transacción
+      await batch.commit()
+
+      console.log('✅ Pago procesado automáticamente:', pagoRef.id)
+      
+      // Mostrar resumen del pago
+      const resumenPago = []
+      if (distribucion.montoMora > 0) resumenPago.push(`Mora: $${distribucion.montoMora.toFixed(2)}`)
+      if (distribucion.montoIntereses > 0) resumenPago.push(`Intereses: $${distribucion.montoIntereses.toFixed(2)}`)
+      if (distribucion.montoCapital > 0) resumenPago.push(`Capital: $${distribucion.montoCapital.toFixed(2)}`)
+      
+      toast({
+        title: "Pago procesado exitosamente",
+        description: `Pago aplicado: ${resumenPago.join(', ')}. ${nuevoEstado === 'finalizado' ? '¡Préstamo finalizado!' : `Saldo restante: $${nuevoSaldoCapital.toFixed(2)}`}`,
+      })
+
+    } catch (error: any) {
+      console.error('❌ Error procesando pago automático:', error)
+      throw new Error(error.message || 'Error al procesar el pago')
+    }
+  }, [empresaActual?.id, user?.uid])
+
+  // ✅ Cargar pagos directamente desde Firebase
   useEffect(() => {
     if (!empresaActual?.id) {
       setPagos([])
-      setLoadingPagos(false)
+      setLoading(false)
       return
     }
 
-    setLoadingPagos(true)
-    setErrorPagos(null)
-
-    const q = query(
+    console.log('🔍 Configurando listener de pagos para empresa:', empresaActual.id)
+    
+    const pagosQuery = query(
       collection(db, 'pagos'),
       where('empresaId', '==', empresaActual.id),
-      orderBy('fechaRegistro', 'desc')
+      orderBy('fechaPago', 'desc')
     )
-
-    console.log('💳 Cargando pagos de empresa:', empresaActual.id)
 
     const unsubscribe = onSnapshot(
-      q,
+      pagosQuery,
       (snapshot) => {
-        const pagosData: PagoSimple[] = []
-        snapshot.forEach((doc) => {
-          try {
-            const data = doc.data()
-            pagosData.push({
-              id: doc.id,
-              ...data,
-              fechaPago: data.fechaPago as Timestamp,
-              fechaRegistro: data.fechaRegistro as Timestamp,
-            } as PagoSimple)
-          } catch (error) {
-            console.error('Error procesando pago:', doc.id, error)
-          }
+        console.log('📄 Documentos de pagos recibidos:', snapshot.size)
+        
+        const pagosData = snapshot.docs.map(doc => {
+          const data = doc.data()
+          console.log('💳 Pago encontrado:', {
+            id: doc.id,
+            numero: data.numero,
+            montoPagado: data.montoPagado
+          })
+          
+          return {
+            id: doc.id,
+            ...data
+          } as PagoSimple
         })
         
-        console.log('✅ Pagos cargados:', pagosData.length)
         setPagos(pagosData)
-        setLoadingPagos(false)
-        setErrorPagos(null)
+        setLoading(false)
+        setError(null)
+        
+        console.log('✅ Total pagos cargados:', pagosData.length)
       },
-      (err) => {
-        console.error('❌ Error cargando pagos:', err)
-        setErrorPagos('Error al cargar los pagos')
-        setLoadingPagos(false)
+      (error) => {
+        console.error('❌ Error cargando pagos:', error)
+        setError(error.message)
+        setLoading(false)
       }
     )
 
-    return unsubscribe
+    return () => unsubscribe()
   }, [empresaActual?.id])
 
-  // Estados básicos para UI
-  const [searchTerm, setSearchTerm] = useState('')
-  const [metodoPagoFilter, setMetodoPagoFilter] = useState<string>('todos')
-  const [estadoFilter, setEstadoFilter] = useState<string>('todos')
-  const [showPagoForm, setShowPagoForm] = useState(false)
-  const [pagoAEliminar, setPagoAEliminar] = useState<any>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
+  // Preparar datos para el formulario
+  const prestamosParaFormulario = useMemo(() => {
+    if (!prestamos || !clientes) return []
 
-  // ✅ Función para obtener nombre de cliente real
-  const obtenerNombreCliente = (clienteId: string) => {
-    const cliente = clientes.find(c => c.id === clienteId)
-    return cliente ? `${cliente.nombre} ${cliente.apellido}` : 'Cliente no encontrado'
-  }
-
-  // ✅ Función para obtener número de préstamo real
-  const obtenerNumeroPrestamo = (prestamoId: string) => {
-    const prestamo = prestamos.find(p => p.id === prestamoId)
-    return prestamo?.numero || 'Préstamo no encontrado'
-  }
-
-  // ✅ Función para formatear fechas de forma segura
-  const formatearFechaSegura = (fecha: any, fallback = 'Fecha no disponible') => {
-    try {
-      const fechaConvertida = convertirFecha(fecha)
-      if (isNaN(fechaConvertida.getTime())) {
-        return fallback
-      }
-      return formatDate(fechaConvertida)
-    } catch (error) {
-      console.error('Error formateando fecha:', error)
-      return fallback
-    }
-  }
-
-  // ✅ Filtros con pagos reales
-  const pagosFiltrados = useMemo(() => {
-    let filtered = pagos
-
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase()
-      filtered = filtered.filter(pago => {
-        const clienteNombre = obtenerNombreCliente(pago.clienteId).toLowerCase()
-        const prestamoNumero = obtenerNumeroPrestamo(pago.prestamoId).toLowerCase()
-        
-        return (
-          pago.numero.toLowerCase().includes(term) ||
-          clienteNombre.includes(term) ||
-          prestamoNumero.includes(term) ||
-          pago.referenciaPago?.toLowerCase().includes(term)
-        )
+    return prestamos
+      .filter(prestamo => prestamo.estado === 'activo' || prestamo.estado === 'atrasado')
+      .map(prestamo => {
+        const cliente = clientes.find(c => c.id === prestamo.clienteId)
+        return {
+          id: prestamo.id,
+          numero: prestamo.numero,
+          clienteNombre: cliente?.nombre || 'Cliente no encontrado',
+          saldoCapital: prestamo.saldoCapital,
+          interesesPendientes: prestamo.interesesPendientes,
+          moraAcumulada: prestamo.moraAcumulada,
+          montoProximoPago: prestamo.montoProximoPago,
+          fechaProximoPago: prestamo.fechaProximoPago ? convertirFecha(prestamo.fechaProximoPago) : null,
+          estado: prestamo.estado
+        }
       })
-    }
+  }, [prestamos, clientes])
 
-    if (metodoPagoFilter !== 'todos') {
-      filtered = filtered.filter(pago => pago.metodoPago === metodoPagoFilter)
-    }
+  // Procesar pagos con información del cliente y préstamo
+  const pagosConInfo = useMemo(() => {
+    if (!clientes || !prestamos) return []
 
-    if (estadoFilter !== 'todos') {
-      filtered = filtered.filter(pago => pago.estado === estadoFilter)
-    }
-
-    return filtered
-  }, [pagos, searchTerm, metodoPagoFilter, estadoFilter, clientes, prestamos])
-
-  // ✅ Estadísticas con datos reales
-  const stats = useMemo(() => {
-    const total = pagos.length
-    const completados = pagos.filter(p => p.estado === 'completado').length
-    const pendientes = pagos.filter(p => p.estado === 'pendiente_verificacion').length
-    
-    const montoTotalRecaudado = pagos
-      .filter(p => p.estado === 'completado')
-      .reduce((sum, p) => sum + p.montoPagado, 0)
-    
-    const capitalRecaudado = pagos
-      .filter(p => p.estado === 'completado')
-      .reduce((sum, p) => sum + (p.montoCapital || 0), 0)
-    
-    const interesesRecaudados = pagos
-      .filter(p => p.estado === 'completado')
-      .reduce((sum, p) => sum + (p.montoIntereses || 0), 0)
-    
-    const moraRecaudada = pagos
-      .filter(p => p.estado === 'completado')
-      .reduce((sum, p) => sum + (p.montoMora || 0), 0)
-
-    // Pagos del mes actual
-    const fechaActual = new Date()
-    const inicioMes = new Date(fechaActual.getFullYear(), fechaActual.getMonth(), 1)
-    const pagosMesActual = pagos.filter(p => {
-      try {
-        const fechaPago = convertirFecha(p.fechaPago)
-        return fechaPago >= inicioMes && p.estado === 'completado'
-      } catch {
-        return false
+    return pagos.map(pago => {
+      const cliente = clientes.find(c => c.id === pago.clienteId)
+      const prestamo = prestamos.find(p => p.id === pago.prestamoId)
+      
+      return {
+        ...pago,
+        clienteNombre: cliente?.nombre || 'Cliente no encontrado',
+        prestamoNumero: prestamo?.numero || 'N/A',
+        fechaPagoFormatted: pago.fechaPago ? convertirFecha(pago.fechaPago) : new Date(),
+        fechaRegistroFormatted: pago.fechaRegistro ? convertirFecha(pago.fechaRegistro) : new Date()
       }
     })
-    const montoMesActual = pagosMesActual.reduce((sum, p) => sum + p.montoPagado, 0)
-
-    return { 
-      total, 
-      completados, 
-      pendientes, 
-      montoTotalRecaudado, 
-      capitalRecaudado, 
-      interesesRecaudados, 
-      moraRecaudada,
-      pagosMesActual: pagosMesActual.length,
-      montoMesActual,
-      // Estadísticas de clientes y préstamos
-      totalClientes: clientes.length,
-      totalPrestamos: prestamos.length,
-      prestamosActivos: prestamos.filter(p => p.estado === 'activo').length
-    }
   }, [pagos, clientes, prestamos])
 
-  const getEstadoColor = (estado: string) => {
-    switch (estado) {
+  // Filtrar pagos
+  const pagosFiltrados = useMemo(() => {
+    return pagosConInfo.filter(pago => {
+      const matchesSearch = searchTerm === '' || 
+        pago.numero.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        pago.clienteNombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        pago.prestamoNumero.toLowerCase().includes(searchTerm.toLowerCase())
+
+      const matchesMetodo = metodoPagoFilter === 'todos' || pago.metodoPago === metodoPagoFilter
+
+      // Para estado, podrías agregar más lógica si tienes estados en los pagos
+      const matchesEstado = estadoFilter === 'todos'
+
+      return matchesSearch && matchesMetodo && matchesEstado
+    })
+  }, [pagosConInfo, searchTerm, metodoPagoFilter, estadoFilter])
+
+  // Calcular estadísticas
+  const estadisticas = useMemo(() => {
+    const totalPagos = pagosFiltrados.reduce((sum, pago) => sum + pago.montoPagado, 0)
+    const totalCapital = pagosFiltrados.reduce((sum, pago) => sum + pago.montoCapital, 0)
+    const totalIntereses = pagosFiltrados.reduce((sum, pago) => sum + pago.montoIntereses, 0)
+    const totalMora = pagosFiltrados.reduce((sum, pago) => sum + pago.montoMora, 0)
+
+    return {
+      totalPagos,
+      totalCapital,
+      totalIntereses,
+      totalMora,
+      cantidadPagos: pagosFiltrados.length
+    }
+  }, [pagosFiltrados])
+
+  const getEstadoBadgeColor = (estado: string) => {
+    switch (estado.toLowerCase()) {
       case 'completado': return 'bg-green-100 text-green-800'
-      case 'pendiente_verificacion': return 'bg-yellow-100 text-yellow-800'
-      case 'rechazado': return 'bg-red-100 text-red-800'
+      case 'pendiente': return 'bg-yellow-100 text-yellow-800'
+      case 'fallido': return 'bg-red-100 text-red-800'
       default: return 'bg-gray-100 text-gray-800'
     }
   }
@@ -283,10 +431,10 @@ export default function PagosPage() {
   }
 
   const handleNuevoPago = () => {
-    if (prestamos.length === 0) {
+    if (prestamosParaFormulario.length === 0) {
       toast({
         title: "No hay préstamos disponibles",
-        description: "Primero debes crear un préstamo para registrar pagos",
+        description: "Primero debes crear un préstamo activo para registrar pagos",
         variant: "destructive"
       })
       return
@@ -318,6 +466,11 @@ export default function PagosPage() {
     setEstadoFilter('todos')
   }
 
+  const handlePagoSuccess = () => {
+    // El listener automático actualizará la lista
+    console.log('✅ Pago registrado exitosamente')
+  }
+
   // Verificar autenticación
   if (!empresaActual) {
     return (
@@ -334,395 +487,323 @@ export default function PagosPage() {
     )
   }
 
-  // ✅ Mostrar loading si los datos se están cargando
-  const isLoading = loadingClientes || loadingPrestamos || loadingPagos
-
-  // ✅ Mostrar error si hay problemas cargando pagos
-  if (errorPagos) {
+  // ✅ Mostrar loading si los datos están cargando
+  if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="container mx-auto p-6">
         <Card>
-          <CardContent className="p-12 text-center">
-            <div className="text-red-500 mb-4">
-              <AlertCircle className="h-12 w-12 mx-auto" />
+          <CardContent className="flex items-center justify-center h-48">
+            <div className="text-center">
+              <Loader2 className="h-12 w-12 text-blue-600 mx-auto mb-4 animate-spin" />
+              <p className="text-gray-600">Cargando pagos...</p>
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Error al cargar pagos</h3>
-            <p className="text-gray-600 mb-6">{errorPagos}</p>
-            <Button onClick={handleRecargarPagos} variant="outline">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Reintentar
-            </Button>
           </CardContent>
         </Card>
       </div>
     )
   }
-  
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <Receipt className="h-8 w-8 text-purple-600" />
+
+  // ✅ Mostrar error si hay problema
+  if (error) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="border-red-200">
+          <CardContent className="flex items-center justify-center h-48">
+            <div className="text-center">
+              <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+              <p className="text-red-600 mb-2">Error cargando pagos</p>
+              <p className="text-sm text-gray-600">{error}</p>
             </div>
-            Gestión de Pagos
-            {isLoading && <Loader2 className="h-6 w-6 animate-spin text-purple-600" />}
-          </h1>
-          <p className="text-gray-600 mt-2">
-            {/* ✅ Información actualizada con pagos reales */}
-            Registra y administra todos los pagos de {empresaActual.nombre} • {stats.totalClientes} clientes • {stats.totalPrestamos} préstamos • {stats.total} pagos
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Gestión de Pagos</h1>
+          <p className="text-gray-600">
+            Registra y monitorea los pagos de préstamos
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={handleRecargarPagos} disabled={isLoading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-            Recargar
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleRecargarPagos}
+            disabled={loading}
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Actualizar
           </Button>
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-2" />
-            Exportar
-          </Button>
-          <Button onClick={handleNuevoPago} className="bg-purple-600 hover:bg-purple-700">
+          <Button onClick={handleNuevoPago}>
             <Plus className="h-4 w-4 mr-2" />
-            Registrar Pago
+            Nuevo Pago
           </Button>
         </div>
       </div>
 
-      {/* ✅ Stats Cards con estadísticas reales de pagos */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Estadísticas */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Pagos</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
-              </div>
-              <div className="p-3 bg-purple-100 rounded-full">
-                <Receipt className="h-6 w-6 text-purple-600" />
-              </div>
-            </div>
-            <div className="mt-4 flex items-center text-sm">
-              <CheckCircle className="h-4 w-4 text-green-500 mr-1" />
-              <span className="text-green-600">{stats.completados} completados</span>
-            </div>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Recaudado</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(estadisticas.totalPagos)}</div>
+            <p className="text-xs text-muted-foreground">
+              {estadisticas.cantidadPagos} pagos registrados
+            </p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Recaudado</p>
-                <p className="text-3xl font-bold text-gray-900">{formatCurrency(stats.montoTotalRecaudado)}</p>
-              </div>
-              <div className="p-3 bg-green-100 rounded-full">
-                <DollarSign className="h-6 w-6 text-green-600" />
-              </div>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Capital Pagado</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {formatCurrency(estadisticas.totalCapital)}
             </div>
-            <div className="mt-4 flex items-center text-sm">
-              <TrendingUp className="h-4 w-4 text-green-500 mr-1" />
-              <span className="text-green-600">Ingresos totales</span>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Principal de préstamos
+            </p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Pagos Este Mes</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.pagosMesActual}</p>
-              </div>
-              <div className="p-3 bg-blue-100 rounded-full">
-                <Calendar className="h-6 w-6 text-blue-600" />
-              </div>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Intereses Cobrados</CardTitle>
+            <Receipt className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {formatCurrency(estadisticas.totalIntereses)}
             </div>
-            <div className="mt-4 flex items-center text-sm">
-              <span className="text-blue-600">{formatCurrency(stats.montoMesActual)}</span>
-              <span className="text-gray-500 ml-1">recaudado</span>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Ganancias por intereses
+            </p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Intereses + Mora</p>
-                <p className="text-3xl font-bold text-gray-900">
-                  {formatCurrency(stats.interesesRecaudados + stats.moraRecaudada)}
-                </p>
-              </div>
-              <div className="p-3 bg-orange-100 rounded-full">
-                <TrendingUp className="h-6 w-6 text-orange-600" />
-              </div>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Mora Cobrada</CardTitle>
+            <AlertCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">
+              {formatCurrency(estadisticas.totalMora)}
             </div>
-            <div className="mt-4 flex items-center text-sm">
-              <span className="text-orange-600">Ganancias</span>
-              <span className="text-gray-500 ml-1">adicionales</span>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Penalizaciones por atraso
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* ✅ Alertas con datos reales */}
-      {stats.pendientes > 0 && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="h-6 w-6 text-yellow-600" />
-              <div>
-                <h3 className="font-semibold text-yellow-800">
-                  {stats.pendientes} pago{stats.pendientes > 1 ? 's' : ''} pendiente{stats.pendientes > 1 ? 's' : ''} de verificación
-                </h3>
-                <p className="text-yellow-700">
-                  Revisa los pagos pendientes para confirmar su validez
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {prestamos.length === 0 && !isLoading && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="h-6 w-6 text-yellow-600" />
-              <div>
-                <h3 className="font-semibold text-yellow-800">
-                  No hay préstamos disponibles
-                </h3>
-                <p className="text-yellow-700">
-                  Para registrar pagos necesitas tener préstamos creados. Ve a la sección de Préstamos para crear uno.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Filters */}
+      {/* Filtros */}
       <Card>
-        <CardContent className="p-6">
-          <div className="flex flex-col lg:flex-row gap-4">
+        <CardHeader>
+          <CardTitle className="text-lg">Filtros</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center">
             <div className="flex-1">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Buscar por número, cliente, préstamo, referencia..."
+                  placeholder="Buscar por número, cliente o préstamo..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
                 />
               </div>
             </div>
-            <div className="flex gap-2 flex-wrap">
-              <Select value={metodoPagoFilter} onValueChange={setMetodoPagoFilter}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Método" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos los métodos</SelectItem>
-                  <SelectItem value="efectivo">Efectivo</SelectItem>
-                  <SelectItem value="transferencia">Transferencia</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="yappy">Yappy</SelectItem>
-                  <SelectItem value="nequi">Nequi</SelectItem> 
-                  <SelectItem value="otro">Otro</SelectItem>
-                </SelectContent>
-              </Select>
 
-              <Select value={estadoFilter} onValueChange={setEstadoFilter}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos los estados</SelectItem>
-                  <SelectItem value="completado">Completados</SelectItem>
-                  <SelectItem value="pendiente_verificacion">Pendientes</SelectItem>
-                  <SelectItem value="rechazado">Rechazados</SelectItem>
-                </SelectContent>
-              </Select>
+            <Select value={metodoPagoFilter} onValueChange={setMetodoPagoFilter}>
+              <SelectTrigger className="w-full md:w-48">
+                <SelectValue placeholder="Método de pago" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los métodos</SelectItem>
+                <SelectItem value="efectivo">Efectivo</SelectItem>
+                <SelectItem value="transferencia">Transferencia</SelectItem>
+                <SelectItem value="cheque">Cheque</SelectItem>
+              </SelectContent>
+            </Select>
 
-              {(searchTerm || metodoPagoFilter !== 'todos' || estadoFilter !== 'todos') && (
-                <Button variant="outline" size="sm" onClick={limpiarFiltros}>
-                  <Filter className="h-4 w-4 mr-2" />
-                  Limpiar
+            <Button variant="outline" onClick={limpiarFiltros}>
+              <Filter className="h-4 w-4 mr-2" />
+              Limpiar
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Lista de Pagos */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Pagos Registrados</CardTitle>
+            <Badge variant="outline">{pagosFiltrados.length} resultados</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {pagosFiltrados.length === 0 ? (
+            <div className="text-center py-12">
+              <Receipt className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No hay pagos registrados</h3>
+              <p className="text-gray-600 mb-4">
+                {pagos.length === 0 
+                  ? "Comienza registrando el primer pago de un préstamo"
+                  : "No se encontraron pagos con los filtros aplicados"
+                }
+              </p>
+              {prestamosParaFormulario.length > 0 && (
+                <Button onClick={handleNuevoPago}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Registrar Primer Pago
                 </Button>
               )}
             </div>
-          </div>
-          
-          {(searchTerm || metodoPagoFilter !== 'todos' || estadoFilter !== 'todos') && (
-            <div className="mt-4 text-sm text-gray-600">
-              Mostrando {pagosFiltrados.length} de {pagos.length} pagos
+          ) : (
+            <div className="space-y-4">
+              {pagosFiltrados.map((pago) => (
+                <div
+                  key={pago.id}
+                  className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Badge variant="outline" className="font-mono">
+                          {pago.numero}
+                        </Badge>
+                        <div className="flex items-center gap-1">
+                          {getMetodoPagoIcon(pago.metodoPago)}
+                          <span className="text-sm text-gray-600 capitalize">
+                            {pago.metodoPago}
+                          </span>
+                        </div>
+                        {pago.referenciaPago && (
+                          <Badge variant="secondary" className="text-xs">
+                            {pago.referenciaPago}
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <p className="text-sm text-gray-600">Cliente y Préstamo</p>
+                          <p className="font-semibold">{pago.clienteNombre}</p>
+                          <p className="text-sm text-gray-600">
+                            Préstamo: {pago.prestamoNumero}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-sm text-gray-600">Distribución del Pago</p>
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-sm">
+                              <span>Total:</span>
+                              <span className="font-semibold">
+                                {formatCurrency(pago.montoPagado)}
+                              </span>
+                            </div>
+                            {pago.montoCapital > 0 && (
+                              <div className="flex justify-between text-xs text-green-600">
+                                <span>Capital:</span>
+                                <span>{formatCurrency(pago.montoCapital)}</span>
+                              </div>
+                            )}
+                            {pago.montoIntereses > 0 && (
+                              <div className="flex justify-between text-xs text-blue-600">
+                                <span>Intereses:</span>
+                                <span>{formatCurrency(pago.montoIntereses)}</span>
+                              </div>
+                            )}
+                            {pago.montoMora > 0 && (
+                              <div className="flex justify-between text-xs text-orange-600">
+                                <span>Mora:</span>
+                                <span>{formatCurrency(pago.montoMora)}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-sm text-gray-600">Fechas</p>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1 text-sm">
+                              <Calendar className="h-3 w-3" />
+                              <span>Pago: {formatDate(pago.fechaPagoFormatted)}</span>
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              Registrado: {formatDate(pago.fechaRegistroFormatted)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {pago.observaciones && (
+                        <div className="mt-3 p-2 bg-gray-50 rounded text-sm">
+                          <strong>Observaciones:</strong> {pago.observaciones}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="ml-4">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+                          <DropdownMenuItem>
+                            <Eye className="h-4 w-4 mr-2" />
+                            Ver Detalles
+                          </DropdownMenuItem>
+                          <DropdownMenuItem disabled>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Editar (Próximamente)
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            className="text-red-600"
+                            onClick={() => setPagoAEliminar(pago)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Eliminar
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* ✅ Lista de Pagos REALES */}
-      <div className="grid gap-6">
-        {isLoading && pagos.length === 0 ? (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <Loader2 className="h-8 w-8 animate-spin text-purple-600 mx-auto mb-4" />
-              <p className="text-gray-600">Cargando pagos...</p>
-            </CardContent>
-          </Card>
-        ) : pagosFiltrados.length === 0 ? (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <Receipt className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {pagos.length === 0 
-                  ? 'No hay pagos registrados'
-                  : 'No se encontraron pagos'
-                }
-              </h3>
-              <p className="text-gray-600 mb-6">
-                {pagos.length === 0 
-                  ? 'Comienza registrando el primer pago de un préstamo'
-                  : 'Intenta ajustar los filtros de búsqueda'
-                }
-              </p>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                {pagos.length === 0 ? (
-                  <Button onClick={handleNuevoPago} className="bg-purple-600 hover:bg-purple-700" disabled={prestamos.length === 0}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Registrar Primer Pago
-                  </Button>
-                ) : (
-                  <>
-                    <Button onClick={limpiarFiltros} variant="outline">
-                      Limpiar Filtros
-                    </Button>
-                    <Button onClick={handleNuevoPago} className="bg-purple-600 hover:bg-purple-700" disabled={prestamos.length === 0}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Nuevo Pago
-                    </Button>
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          // ✅ Lista de pagos reales con opciones de menú
-          pagosFiltrados.map((pago) => (
-            <Card key={pago.id} className="hover:shadow-lg transition-shadow">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start space-x-4 flex-1">
-                    <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold text-lg">
-                      <Receipt className="h-6 w-6" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2 flex-wrap">
-                        <h3 className="text-lg font-semibold text-gray-900">
-                          {pago.numero}
-                        </h3>
-                        <Badge className={getEstadoColor(pago.estado)}>
-                          <div className="flex items-center gap-1">
-                            {pago.estado === 'completado' && <CheckCircle className="h-4 w-4" />}
-                            {pago.estado === 'pendiente_verificacion' && <AlertCircle className="h-4 w-4" />}
-                            <span className="capitalize">{pago.estado.replace('_', ' ')}</span>
-                          </div>
-                        </Badge>
-                        <Badge variant="outline" className="text-xs">
-                          {getMetodoPagoIcon(pago.metodoPago)}
-                          <span className="ml-1 capitalize">{pago.metodoPago}</span>
-                        </Badge>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 text-sm text-gray-600">
-                        <div>
-                          <strong>Cliente:</strong> {obtenerNombreCliente(pago.clienteId)}
-                        </div>
-                        <div>
-                          <strong>Préstamo:</strong> {obtenerNumeroPrestamo(pago.prestamoId)}
-                        </div>
-                      </div>
+      {/* Formulario de Nuevo Pago */}
+      <PagoForm
+        open={showPagoForm}
+        onOpenChange={setShowPagoForm}
+        prestamos={prestamosParaFormulario}
+        onSuccess={handlePagoSuccess}
+        onPagoRegistrado={procesarPagoAutomatico}
+      />
 
-                      <div className="text-sm text-gray-600">
-                        <p><strong>Monto pagado:</strong> {formatCurrency(pago.montoPagado)}</p>
-                        <p><strong>Fecha:</strong> {formatearFechaSegura(pago.fechaPago)}</p>
-                        {pago.observaciones && (
-                          <p><strong>Observaciones:</strong> {pago.observaciones}</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ✅ Menú de opciones para cada pago */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="flex-shrink-0">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem>
-                        <Eye className="h-4 w-4 mr-2" />
-                        Ver Detalles
-                      </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <Download className="h-4 w-4 mr-2" />
-                        Descargar Recibo
-                      </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Editar
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem 
-                        className="text-red-600"
-                        onClick={() => setPagoAEliminar(pago)}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Eliminar
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </div>
-
-      {/* Modal placeholder para nuevo pago */}
-      {showPagoForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md mx-4">
-            <CardHeader>
-              <CardTitle>Registrar Pago</CardTitle>
-              <CardDescription>
-                Hook simplificado funcionando
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-600 mb-4">
-                Los pagos ahora se cargan correctamente desde Firebase.
-                Formulario completo disponible en el próximo paso.
-              </p>
-              <Button 
-                onClick={() => setShowPagoForm(false)}
-                className="w-full"
-              >
-                Cerrar
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* ✅ Dialog de eliminación */}
+      {/* Dialog de Confirmación para Eliminar */}
       <AlertDialog 
         open={!!pagoAEliminar} 
         onOpenChange={() => setPagoAEliminar(null)}
@@ -763,11 +844,12 @@ export default function PagosPage() {
             <CheckCircle className="h-6 w-6 text-green-600" />
             <div>
               <h3 className="font-semibold text-green-800">
-                ✅ Paso 3 Funcionando: Pagos Reales Cargados
+                ✅ Paso 4 Completado: Sistema de Pagos Funcionando
               </h3>
               <p className="text-green-700">
-                Hook simplificado funcionando correctamente. La página carga {pagos.length} pagos reales desde Firebase.
-                El error de hooks se solucionó usando Firebase directamente en el componente.
+                Sistema completo funcionando sin errores de hooks. Puedes registrar pagos para préstamos activos. 
+                La página carga {pagos.length} pagos reales y tiene {prestamosParaFormulario.length} préstamos disponibles para registro.
+                Función de registro de pagos integrada directamente en el componente.
               </p>
             </div>
           </div>
