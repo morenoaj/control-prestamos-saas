@@ -1,10 +1,12 @@
-// src/components/pagos/PagoForm.tsx - CORREGIDO
+// src/components/pagos/PagoForm.tsx - ACTUALIZADO
 'use client'
 
 import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { usePrestamos } from '@/hooks/usePrestamos'
+import { useClientes } from '@/hooks/useClientes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -97,10 +99,14 @@ const calcularMora = (saldoPendiente: number, diasAtraso: number, tasaMora: numb
   return saldoPendiente * (tasaMora / 100) * (diasAtraso / 30) // Mora mensual prorrateada
 }
 
-export function PagoForm({ isOpen, onClose, prestamo, cliente, onSave }: PagoFormProps) {
+export function PagoForm({ isOpen, onClose, prestamo: prestamoInicial, cliente: clienteInicial, onSave }: PagoFormProps) {
+  const { prestamos } = usePrestamos()
+  const { clientes } = useClientes()
   const [isLoading, setIsLoading] = useState(false)
   const [calculoPago, setCalculoPago] = useState<CalculoPago | null>(null)
   const [loadingCalculo, setLoadingCalculo] = useState(false)
+  const [prestamoSeleccionado, setPrestamoSeleccionado] = useState<Prestamo | null>(prestamoInicial || null)
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(clienteInicial || null)
 
   const {
     register,
@@ -112,7 +118,7 @@ export function PagoForm({ isOpen, onClose, prestamo, cliente, onSave }: PagoFor
   } = useForm<PagoFormSchemaData>({
     resolver: zodResolver(pagoSchema),
     defaultValues: {
-      prestamoId: prestamo?.id || '',
+      prestamoId: prestamoInicial?.id || '',
       montoPagado: 0,
       metodoPago: '',
       referenciaPago: '',
@@ -123,32 +129,59 @@ export function PagoForm({ isOpen, onClose, prestamo, cliente, onSave }: PagoFor
 
   // Observar cambios en el monto para calcular distribución
   const watchedMonto = watch('montoPagado')
+  const watchedPrestamoId = watch('prestamoId')
+
+  // Actualizar préstamo y cliente cuando cambia la selección
+  useEffect(() => {
+    if (watchedPrestamoId) {
+      const prestamo = prestamos.find(p => p.id === watchedPrestamoId)
+      const cliente = prestamo ? clientes.find(c => c.id === prestamo.clienteId) : null
+      setPrestamoSeleccionado(prestamo || null)
+      setClienteSeleccionado(cliente || null)
+    }
+  }, [watchedPrestamoId, prestamos, clientes])
 
   // Cargar cálculo de pagos pendientes cuando se selecciona un préstamo
   useEffect(() => {
-    if (prestamo?.id) {
+    if (prestamoSeleccionado?.id) {
       setLoadingCalculo(true)
       
       // Calcular valores directamente del préstamo
-      const fechaVencimiento = convertirFecha(prestamo.fechaVencimiento)
+      const fechaVencimiento = convertirFecha(prestamoSeleccionado.fechaVencimiento)
       const diasAtraso = calcularDiasAtraso(fechaVencimiento)
-      const moraPendiente = calcularMora(prestamo.saldoCapital, diasAtraso)
+      const moraPendiente = calcularMora(prestamoSeleccionado.saldoCapital, diasAtraso)
       
       const calculo: CalculoPago = {
-        montoCapitalPendiente: prestamo.saldoCapital,
-        montoInteresesPendientes: prestamo.interesesPendientes,
+        montoCapitalPendiente: prestamoSeleccionado.saldoCapital,
+        montoInteresesPendientes: prestamoSeleccionado.interesesPendientes,
         montoMoraPendiente: moraPendiente,
-        totalPendiente: prestamo.saldoCapital + prestamo.interesesPendientes + moraPendiente,
+        totalPendiente: prestamoSeleccionado.saldoCapital + prestamoSeleccionado.interesesPendientes + moraPendiente,
         diasAtraso,
         tasaMora: 2, // 2% mensual
-        fechaProximoPago: convertirFecha(prestamo.fechaProximoPago),
-        montoProximoPago: prestamo.montoProximoPago
+        fechaProximoPago: convertirFecha(prestamoSeleccionado.fechaProximoPago),
+        montoProximoPago: prestamoSeleccionado.montoProximoPago
       }
       
       setCalculoPago(calculo)
       setLoadingCalculo(false)
     }
-  }, [prestamo])
+  }, [prestamoSeleccionado])
+
+  // Reset form when modal opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      setPrestamoSeleccionado(prestamoInicial || null)
+      setClienteSeleccionado(clienteInicial || null)
+      reset({
+        prestamoId: prestamoInicial?.id || '',
+        montoPagado: 0,
+        metodoPago: '',
+        referenciaPago: '',
+        fechaPago: new Date(),
+        observaciones: '',
+      })
+    }
+  }, [isOpen, prestamoInicial, clienteInicial, reset])
 
   // Calcular distribución del pago
   const calcularDistribucion = (monto: number) => {
@@ -197,7 +230,7 @@ export function PagoForm({ isOpen, onClose, prestamo, cliente, onSave }: PagoFor
   const distribucion = calcularDistribucion(watchedMonto || 0)
 
   const onSubmit = async (data: PagoFormSchemaData) => {
-    if (!prestamo || !calculoPago) {
+    if (!prestamoSeleccionado || !calculoPago) {
       toast({
         title: "Error",
         description: "No se puede procesar el pago sin información del préstamo",
@@ -258,6 +291,9 @@ export function PagoForm({ isOpen, onClose, prestamo, cliente, onSave }: PagoFor
     }
   }
 
+  // Filtrar solo préstamos activos
+  const prestamosActivos = prestamos.filter(p => p.estado === 'activo' || p.estado === 'atrasado')
+
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -276,8 +312,53 @@ export function PagoForm({ isOpen, onClose, prestamo, cliente, onSave }: PagoFor
           <div className="lg:col-span-2 space-y-6">
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
               
+              {/* Selección de Préstamo (solo si no viene preseleccionado) */}
+              {!prestamoInicial && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <CreditCard className="h-5 w-5" />
+                      Seleccionar Préstamo
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <Label htmlFor="prestamoId">Préstamo *</Label>
+                      <Select 
+                        onValueChange={(value: string) => setValue('prestamoId', value)}
+                        defaultValue=""
+                      >
+                        <SelectTrigger className={errors.prestamoId ? 'border-red-500' : ''}>
+                          <SelectValue placeholder="Selecciona un préstamo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {prestamosActivos.map((prestamo) => {
+                            const cliente = clientes.find(c => c.id === prestamo.clienteId)
+                            return (
+                              <SelectItem key={prestamo.id} value={prestamo.id}>
+                                <div className="flex flex-col">
+                                  <span className="font-medium">
+                                    {prestamo.numero} - {cliente ? `${cliente.nombre} ${cliente.apellido}` : 'Cliente no encontrado'}
+                                  </span>
+                                  <span className="text-sm text-gray-500">
+                                    Saldo: {formatCurrency(prestamo.saldoCapital)}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            )
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {errors.prestamoId && (
+                        <p className="text-sm text-red-600">{errors.prestamoId.message}</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+              
               {/* Información del Préstamo */}
-              {prestamo && cliente && (
+              {prestamoSeleccionado && clienteSeleccionado && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -289,24 +370,24 @@ export function PagoForm({ isOpen, onClose, prestamo, cliente, onSave }: PagoFor
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="font-medium text-gray-700">Préstamo:</span>
-                        <div className="font-semibold text-gray-900">{prestamo.numero}</div>
+                        <div className="font-semibold text-gray-900">{prestamoSeleccionado.numero}</div>
                       </div>
                       <div>
                         <span className="font-medium text-gray-700">Cliente:</span>
                         <div className="font-semibold text-gray-900">
-                          {cliente.nombre} {cliente.apellido}
+                          {clienteSeleccionado.nombre} {clienteSeleccionado.apellido}
                         </div>
                       </div>
                       <div>
                         <span className="font-medium text-gray-700">Monto Original:</span>
                         <div className="font-semibold text-green-600">
-                          {formatCurrency(prestamo.monto)}
+                          {formatCurrency(prestamoSeleccionado.monto)}
                         </div>
                       </div>
                       <div>
                         <span className="font-medium text-gray-700">Saldo Actual:</span>
                         <div className="font-semibold text-orange-600">
-                          {formatCurrency(prestamo.saldoCapital)}
+                          {formatCurrency(prestamoSeleccionado.saldoCapital)}
                         </div>
                       </div>
                     </div>
@@ -616,7 +697,7 @@ export function PagoForm({ isOpen, onClose, prestamo, cliente, onSave }: PagoFor
           </Button>
           <Button 
             onClick={handleSubmit(onSubmit)} 
-            disabled={isLoading || !prestamo || !calculoPago || !watchedMonto || watchedMonto <= 0}
+            disabled={isLoading || !prestamoSeleccionado || !calculoPago || !watchedMonto || watchedMonto <= 0}
             className="bg-green-600 hover:bg-green-700"
           >
             {isLoading ? (
