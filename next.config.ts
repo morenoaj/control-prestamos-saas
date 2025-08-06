@@ -16,9 +16,8 @@ const nextConfig: NextConfig = {
       }
     ]
   },
-  experimental: {
-    serverComponentsExternalPackages: ['firebase-admin']
-  }
+  // ✅ Configuración corregida para firebase-admin
+  serverExternalPackages: ['firebase-admin']
 };
 
 export default nextConfig;

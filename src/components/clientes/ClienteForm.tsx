@@ -1,7 +1,7 @@
-// src/components/clientes/ClienteForm.tsx - CORREGIDO
+// src/components/clientes/ClienteForm.tsx - CORREGIDO PARA EDICIÓN
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -79,7 +79,7 @@ interface ClienteFormProps {
 export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormProps) {
   const { empresaActual } = useAuth()
   const [isLoading, setIsLoading] = useState(false)
-  const [creditScore, setCreditScore] = useState(cliente?.creditScore || 0)
+  const [creditScore, setCreditScore] = useState(0)
 
   const {
     register,
@@ -92,20 +92,18 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
   } = useForm<ClienteFormData>({
     resolver: zodResolver(clienteSchema),
     defaultValues: {
-      nombre: cliente?.nombre || '',
-      apellido: cliente?.apellido || '',
-      cedula: cliente?.cedula || '',
-      telefono: cliente?.telefono || '',
-      telefonoSecundario: cliente?.telefonoSecundario || '',
-      email: cliente?.email || '',
-      direccion: cliente?.direccion || '',
-      estadoCivil: cliente?.estadoCivil || '',
-      ocupacion: cliente?.ocupacion || '',
-      ingresosMensuales: cliente?.ingresosMensuales || 0,
-      observaciones: cliente?.observaciones || '',
-      referencias: cliente?.referencias && cliente.referencias.length > 0 ? cliente.referencias : [
-        { nombre: '', telefono: '', relacion: '' }
-      ],
+      nombre: '',
+      apellido: '',
+      cedula: '',
+      telefono: '',
+      telefonoSecundario: '',
+      email: '',
+      direccion: '',
+      estadoCivil: '',
+      ocupacion: '',
+      ingresosMensuales: 0,
+      observaciones: '',
+      referencias: [{ nombre: '', telefono: '', relacion: '' }],
     }
   })
 
@@ -113,6 +111,52 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
     control,
     name: 'referencias',
   })
+
+  // ✅ EFECTO PARA CARGAR DATOS DEL CLIENTE AL ABRIR PARA EDITAR
+  useEffect(() => {
+    if (isOpen && cliente) {
+      console.log('🔄 Cargando datos del cliente para editar:', cliente)
+      
+      // Resetear y cargar todos los campos
+      reset({
+        nombre: cliente.nombre || '',
+        apellido: cliente.apellido || '',
+        cedula: cliente.cedula || '',
+        telefono: cliente.telefono || '',
+        telefonoSecundario: cliente.telefonoSecundario || '',
+        email: cliente.email || '',
+        direccion: cliente.direccion || '',
+        estadoCivil: cliente.estadoCivil || '',
+        ocupacion: cliente.ocupacion || '',
+        ingresosMensuales: cliente.ingresosMensuales || 0,
+        observaciones: cliente.observaciones || '',
+        referencias: cliente.referencias && cliente.referencias.length > 0 
+          ? cliente.referencias 
+          : [{ nombre: '', telefono: '', relacion: '' }]
+      })
+      
+      setCreditScore(cliente.creditScore || 0)
+      console.log('✅ Datos del cliente cargados en el formulario')
+    } else if (isOpen && !cliente) {
+      // Si es un cliente nuevo, resetear el formulario
+      console.log('🆕 Formulario para nuevo cliente')
+      reset({
+        nombre: '',
+        apellido: '',
+        cedula: '',
+        telefono: '',
+        telefonoSecundario: '',
+        email: '',
+        direccion: '',
+        estadoCivil: '',
+        ocupacion: '',
+        ingresosMensuales: 0,
+        observaciones: '',
+        referencias: [{ nombre: '', telefono: '', relacion: '' }]
+      })
+      setCreditScore(0)
+    }
+  }, [isOpen, cliente, reset])
 
   // Calcular credit score automáticamente
   const watchedFields = watch()
@@ -146,10 +190,10 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
   }
 
   // Actualizar score cuando cambien los campos
-  useState(() => {
+  useEffect(() => {
     const newScore = calculateCreditScore()
     setCreditScore(newScore)
-  })
+  }, [watchedFields])
 
   const onSubmit = async (data: ClienteFormData) => {
     setIsLoading(true)
@@ -201,7 +245,6 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
         description: `${data.nombre} ${data.apellido} ha sido ${cliente ? 'actualizado' : 'registrado'} correctamente`,
       })
       
-      reset()
       onClose()
     } catch (error: any) {
       console.error('❌ Error en onSubmit:', error)
@@ -243,7 +286,7 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
           </DialogTitle>
           <DialogDescription>
             {cliente 
-              ? 'Modifica la información del cliente'
+              ? `Modifica la información de ${cliente.nombre} ${cliente.apellido}`
               : 'Completa los datos para registrar un nuevo cliente'
             }
           </DialogDescription>
@@ -303,17 +346,17 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                   <Label htmlFor="estadoCivil">Estado Civil *</Label>
                   <Select 
                     onValueChange={(value: string) => setValue('estadoCivil', value)}
-                    defaultValue={cliente?.estadoCivil || ''}
+                    value={watchedFields.estadoCivil}
                   >
                     <SelectTrigger className={errors.estadoCivil ? 'border-red-500' : ''}>
                       <SelectValue placeholder="Selecciona estado civil" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Soltero">Soltero(a)</SelectItem>
-                      <SelectItem value="Casado">Casado(a)</SelectItem>
-                      <SelectItem value="Divorciado">Divorciado(a)</SelectItem>
-                      <SelectItem value="Viudo">Viudo(a)</SelectItem>
+                      <SelectItem value="Soltero">Soltero/a</SelectItem>
+                      <SelectItem value="Casado">Casado/a</SelectItem>
                       <SelectItem value="Unión libre">Unión libre</SelectItem>
+                      <SelectItem value="Divorciado">Divorciado/a</SelectItem>
+                      <SelectItem value="Viudo">Viudo/a</SelectItem>
                     </SelectContent>
                   </Select>
                   {errors.estadoCivil && (
@@ -352,9 +395,8 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                   <Input
                     id="telefonoSecundario"
                     {...register('telefonoSecundario')}
-                    placeholder="Ej: +507 6000-5678 (opcional)"
+                    placeholder="Ej: +507 6000-5678"
                   />
-                  <p className="text-xs text-gray-500">Opcional - deja vacío si no aplica</p>
                 </div>
 
                 <div className="space-y-2">
@@ -363,38 +405,37 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                     id="email"
                     type="email"
                     {...register('email')}
-                    placeholder="Ej: maria@email.com (opcional)"
+                    placeholder="Ej: maria@email.com"
                     className={errors.email ? 'border-red-500' : ''}
                   />
-                  <p className="text-xs text-gray-500">Opcional - deja vacío si no aplica</p>
                   {errors.email && (
                     <p className="text-sm text-red-600">{errors.email.message}</p>
                   )}
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="direccion">Dirección Completa *</Label>
-                <Textarea
-                  id="direccion"
-                  {...register('direccion')}
-                  placeholder="Ej: Calle 50, Edificio Torres del Mar, Piso 5, Apt 5A, Ciudad de Panamá"
-                  className={errors.direccion ? 'border-red-500' : ''}
-                  rows={3}
-                />
-                {errors.direccion && (
-                  <p className="text-sm text-red-600">{errors.direccion.message}</p>
-                )}
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="direccion">Dirección *</Label>
+                  <Textarea
+                    id="direccion"
+                    {...register('direccion')}
+                    placeholder="Dirección completa con referencias"
+                    className={errors.direccion ? 'border-red-500' : ''}
+                    rows={3}
+                  />
+                  {errors.direccion && (
+                    <p className="text-sm text-red-600">{errors.direccion.message}</p>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Información Laboral y Financiera */}
+          {/* Información Laboral */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <DollarSign className="h-5 w-5" />
-                Información Laboral y Financiera
+                Información Laboral
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -404,7 +445,7 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                   <Input
                     id="ocupacion"
                     {...register('ocupacion')}
-                    placeholder="Ej: Contadora, Ingeniero, Comerciante"
+                    placeholder="Ej: Comerciante, Empleado, etc."
                     className={errors.ocupacion ? 'border-red-500' : ''}
                   />
                   {errors.ocupacion && (
@@ -413,12 +454,12 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="ingresosMensuales">Ingresos Mensuales (USD) *</Label>
+                  <Label htmlFor="ingresosMensuales">Ingresos Mensuales *</Label>
                   <Input
                     id="ingresosMensuales"
                     type="number"
-                    min="0"
                     step="0.01"
+                    min="0"
                     {...register('ingresosMensuales', { valueAsNumber: true })}
                     placeholder="Ej: 1500.00"
                     className={errors.ingresosMensuales ? 'border-red-500' : ''}
@@ -431,73 +472,15 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
             </CardContent>
           </Card>
 
-          {/* Credit Score */}
+          {/* Referencias Personales */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Star className="h-5 w-5" />
-                Score Crediticio
+                <Users className="h-5 w-5" />
+                Referencias Personales
               </CardTitle>
               <CardDescription>
-                Se calcula automáticamente basado en la información proporcionada
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-4">
-                <div className="text-4xl font-bold">
-                  <span className={getScoreColor(creditScore)}>{creditScore}</span>
-                </div>
-                <div>
-                  <div className={`text-lg font-semibold ${getScoreColor(creditScore)}`}>
-                    {getScoreLabel(creditScore)}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    Score de 0 a 100 puntos
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <div className="w-full bg-gray-200 rounded-full h-3">
-                    <div 
-                      className={`h-3 rounded-full transition-all duration-500 ${
-                        creditScore >= 80 ? 'bg-green-500' :
-                        creditScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-                      }`}
-                      style={{ width: `${creditScore}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-              
-              <Alert className="mt-4">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  <strong>Factores que mejoran el score:</strong> Ingresos altos, múltiples referencias, 
-                  email de contacto, teléfono secundario, estado civil estable.
-                </AlertDescription>
-              </Alert>
-            </CardContent>
-          </Card>
-
-          {/* Referencias */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Users className="h-5 w-5" />
-                  Referencias Personales
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => append({ nombre: '', telefono: '', relacion: '' })}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Agregar
-                </Button>
-              </CardTitle>
-              <CardDescription>
-                Mínimo 1 referencia requerida. Máximo recomendado: 3 referencias.
+                Agrega al menos una referencia personal. Se requiere información completa.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -508,22 +491,22 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                     {fields.length > 1 && (
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
                         onClick={() => remove(index)}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        className="text-red-600 hover:text-red-700"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
                   </div>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor={`referencias.${index}.nombre`}>Nombre Completo *</Label>
+                      <Label htmlFor={`referencias.${index}.nombre`}>Nombre *</Label>
                       <Input
                         {...register(`referencias.${index}.nombre`)}
-                        placeholder="Ej: Juan Pérez"
+                        placeholder="Nombre completo"
                         className={errors.referencias?.[index]?.nombre ? 'border-red-500' : ''}
                       />
                       {errors.referencias?.[index]?.nombre && (
@@ -551,7 +534,7 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                       <Label htmlFor={`referencias.${index}.relacion`}>Relación *</Label>
                       <Select 
                         onValueChange={(value: string) => setValue(`referencias.${index}.relacion`, value)}
-                        defaultValue={cliente?.referencias?.[index]?.relacion || ''}
+                        value={watchedFields.referencias?.[index]?.relacion || ''}
                       >
                         <SelectTrigger className={errors.referencias?.[index]?.relacion ? 'border-red-500' : ''}>
                           <SelectValue placeholder="Selecciona relación" />
@@ -577,57 +560,96 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
                   </div>
                 </div>
               ))}
-              
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => append({ nombre: '', telefono: '', relacion: '' })}
+                className="w-full"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Agregar Referencia
+              </Button>
+
               {errors.referencias && typeof errors.referencias.message === 'string' && (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{errors.referencias.message}</AlertDescription>
-                </Alert>
+                <p className="text-sm text-red-600">{errors.referencias.message}</p>
               )}
             </CardContent>
           </Card>
 
-          {/* Observaciones */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Observaciones Adicionales
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <Label htmlFor="observaciones">Notas sobre el cliente</Label>
+          {/* Observaciones y Credit Score */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Observaciones */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Observaciones
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
                 <Textarea
-                  id="observaciones"
                   {...register('observaciones')}
-                  placeholder="Ej: Cliente confiable, puntual en pagos anteriores, tiene negocio propio... (opcional)"
+                  placeholder="Notas adicionales sobre el cliente..."
                   rows={4}
                 />
-                <p className="text-xs text-gray-500">Opcional - deja vacío si no aplica</p>
-              </div>
-            </CardContent>
-          </Card>
-        </form>
+              </CardContent>
+            </Card>
 
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={handleClose}>
-            <X className="h-4 w-4 mr-2" />
-            Cancelar
-          </Button>
-          <Button 
-            onClick={handleSubmit(onSubmit)} 
-            disabled={isLoading}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            {isLoading ? (
-              <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <Save className="h-4 w-4 mr-2" />
-            )}
-            {cliente ? 'Actualizar' : 'Guardar'} Cliente
-          </Button>
-        </DialogFooter>
+            {/* Credit Score Preview */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Star className="h-5 w-5" />
+                  Evaluación Crediticia
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-center space-y-4">
+                <div className="text-4xl font-bold">
+                  <span className={getScoreColor(creditScore)}>
+                    {creditScore}
+                  </span>
+                </div>
+                <div className={`text-sm font-medium ${getScoreColor(creditScore)}`}>
+                  {getScoreLabel(creditScore)}
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div 
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      creditScore >= 80 ? 'bg-green-500' : 
+                      creditScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                    }`}
+                    style={{ width: `${creditScore}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-600">
+                  Puntuación calculada automáticamente
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Botones de Acción */}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={handleClose}>
+              <X className="h-4 w-4 mr-2" />
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                  {cliente ? 'Actualizando...' : 'Creando...'}
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  {cliente ? 'Actualizar Cliente' : 'Crear Cliente'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

@@ -1,4 +1,4 @@
-// src/app/(dashboard)/dashboard/clientes/page.tsx - VERSIÓN INTEGRADA CORREGIDA
+// src/app/(dashboard)/clientes/page.tsx - CON IMPORT/EXPORT
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { ClienteForm } from '@/components/clientes/ClienteForm'
 import { ClienteDetails } from '@/components/clientes/ClienteDetails'
+import { ImportExportDialog } from '@/components/clientes/ImportExportDialog'
 import { 
   Users, 
   Plus, 
@@ -54,7 +55,8 @@ import {
   Upload,
   Loader2,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  FileSpreadsheet
 } from 'lucide-react'
 import { Cliente } from '@/types/database'
 import { formatCurrency } from '@/lib/utils'
@@ -81,6 +83,7 @@ export default function ClientesPage() {
   const [clienteViewing, setClienteViewing] = useState<Cliente | null>(null)
   const [clienteAEliminar, setClienteAEliminar] = useState<Cliente | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [showImportExport, setShowImportExport] = useState(false)
 
   // Clientes filtrados
   const clientesFiltrados = useMemo(() => {
@@ -89,13 +92,12 @@ export default function ClientesPage() {
     // Filtro por búsqueda
     if (searchTerm) {
       const term = searchTerm.toLowerCase()
-      filtered = filtered.filter(cliente => 
+      filtered = filtered.filter(cliente =>
         cliente.nombre.toLowerCase().includes(term) ||
         cliente.apellido.toLowerCase().includes(term) ||
-        cliente.cedula.includes(term) ||
-        cliente.telefono.includes(term) ||
-        cliente.codigo.toLowerCase().includes(term) ||
-        cliente.email?.toLowerCase().includes(term)
+        cliente.cedula.toLowerCase().includes(term) ||
+        cliente.telefono.toLowerCase().includes(term) ||
+        cliente.codigo.toLowerCase().includes(term)
       )
     }
 
@@ -106,21 +108,26 @@ export default function ClientesPage() {
 
     // Filtro por score crediticio
     if (scoreFilter !== 'todos') {
-      filtered = filtered.filter(cliente => {
-        switch (scoreFilter) {
-          case 'excelente': return cliente.creditScore >= 80
-          case 'bueno': return cliente.creditScore >= 60 && cliente.creditScore < 80
-          case 'regular': return cliente.creditScore >= 40 && cliente.creditScore < 60
-          case 'bajo': return cliente.creditScore < 40
-          default: return true
-        }
-      })
+      switch (scoreFilter) {
+        case 'excelente':
+          filtered = filtered.filter(cliente => cliente.creditScore >= 80)
+          break
+        case 'bueno':
+          filtered = filtered.filter(cliente => cliente.creditScore >= 60 && cliente.creditScore < 80)
+          break
+        case 'regular':
+          filtered = filtered.filter(cliente => cliente.creditScore >= 40 && cliente.creditScore < 60)
+          break
+        case 'bajo':
+          filtered = filtered.filter(cliente => cliente.creditScore < 40)
+          break
+      }
     }
 
     return filtered
   }, [clientes, searchTerm, statusFilter, scoreFilter])
 
-  // Estadísticas calculadas
+  // Estadísticas
   const stats = useMemo(() => {
     const total = clientes.length
     const activos = clientes.filter(c => c.estado === 'activo').length
@@ -202,9 +209,10 @@ export default function ClientesPage() {
       })
       setClienteAEliminar(null)
     } catch (error: any) {
+      console.error('Error eliminando cliente:', error)
       toast({
         title: "Error",
-        description: error.message || "No se pudo eliminar el cliente",
+        description: error.message || "Error al eliminar el cliente",
         variant: "destructive"
       })
     } finally {
@@ -212,26 +220,43 @@ export default function ClientesPage() {
     }
   }
 
-  const limpiarFiltros = () => {
-    setSearchTerm('')
-    setStatusFilter('todos')
-    setScoreFilter('todos')
+  // ✅ FUNCIÓN PARA MANEJAR CLIENTES IMPORTADOS
+  const handleClientesImportados = async (clientesImportados: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'>[]) => {
+    let exitosos = 0
+    let errores = 0
+
+    for (const clienteData of clientesImportados) {
+      try {
+        await crearCliente(clienteData)
+        exitosos++
+      } catch (error) {
+        console.error('Error creando cliente importado:', error)
+        errores++
+      }
+    }
+
+    if (exitosos > 0) {
+      toast({
+        title: "Importación completada",
+        description: `${exitosos} clientes importados correctamente${errores > 0 ? `, ${errores} con errores` : ''}`,
+      })
+    }
+
+    setShowImportExport(false)
   }
 
   if (error) {
     return (
-      <div className="space-y-6">
-        <Card>
-          <CardContent className="p-12 text-center">
-            <div className="text-red-500 mb-4">
-              <AlertCircle className="h-12 w-12 mx-auto" />
+      <div className="p-6">
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-6 w-6 text-red-600" />
+              <div>
+                <h3 className="font-semibold text-red-800">Error cargando clientes</h3>
+                <p className="text-red-700">{error}</p>
+              </div>
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Error al cargar clientes</h3>
-            <p className="text-gray-600 mb-6">{error}</p>
-            <Button onClick={recargarClientes} variant="outline">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Reintentar
-            </Button>
           </CardContent>
         </Card>
       </div>
@@ -239,33 +264,31 @@ export default function ClientesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Users className="h-8 w-8 text-blue-600" />
-            </div>
-            Gestión de Clientes
-            {loading && <Loader2 className="h-6 w-6 animate-spin text-blue-600" />}
-          </h1>
-          <p className="text-gray-600 mt-2">
-            Administra tu cartera de clientes y su información crediticia
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900">Clientes</h1>
+          <p className="text-gray-600">Gestiona tu cartera de clientes</p>
         </div>
+
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={recargarClientes} disabled={loading}>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => recargarClientes()}
+            disabled={loading}
+          >
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Recargar
           </Button>
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-2" />
-            Exportar
-          </Button>
-          <Button variant="outline" size="sm">
-            <Upload className="h-4 w-4 mr-2" />
-            Importar
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => setShowImportExport(true)}
+          >
+            <FileSpreadsheet className="h-4 w-4 mr-2" />
+            Importar/Exportar
           </Button>
           <Button onClick={handleNuevoCliente} className="bg-blue-600 hover:bg-blue-700">
             <Plus className="h-4 w-4 mr-2" />
@@ -327,11 +350,10 @@ export default function ClientesPage() {
               </div>
             </div>
             <div className="mt-4 flex items-center text-sm">
-              <span className={`${getScoreColor(stats.scorePromedio)} px-2 py-1 rounded text-xs font-medium`}>
-                {stats.scorePromedio >= 80 ? 'Excelente' : 
-                 stats.scorePromedio >= 60 ? 'Bueno' : 
-                 stats.scorePromedio >= 40 ? 'Regular' : 'Bajo'}
+              <span className={stats.scorePromedio >= 70 ? 'text-green-600' : 'text-yellow-600'}>
+                {stats.scorePromedio >= 70 ? 'Excelente' : 'Bueno'}
               </span>
+              <span className="text-gray-500 ml-1">riesgo crediticio</span>
             </div>
           </CardContent>
         </Card>
@@ -340,7 +362,7 @@ export default function ClientesPage() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Ingresos Promedio</p>
+                <p className="text-sm font-medium text-gray-600">Ingresos Prom.</p>
                 <p className="text-3xl font-bold text-gray-900">
                   {formatCurrency(stats.ingresosPromedio)}
                 </p>
@@ -357,173 +379,145 @@ export default function ClientesPage() {
         </Card>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  placeholder="Buscar por nombre, cédula, teléfono, código o email..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos los estados</SelectItem>
-                  <SelectItem value="activo">Activos</SelectItem>
-                  <SelectItem value="inactivo">Inactivos</SelectItem>
-                  <SelectItem value="bloqueado">Bloqueados</SelectItem>
-                </SelectContent>
-              </Select>
+      {/* Filtros */}
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="Buscar por nombre, cédula, teléfono o código..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
 
-              <Select value={scoreFilter} onValueChange={setScoreFilter}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Score" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos los scores</SelectItem>
-                  <SelectItem value="excelente">Excelente (80+)</SelectItem>
-                  <SelectItem value="bueno">Bueno (60-79)</SelectItem>
-                  <SelectItem value="regular">Regular (40-59)</SelectItem>
-                  <SelectItem value="bajo">Bajo (&lt;40)</SelectItem>
-                </SelectContent>
-              </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-full md:w-[180px]">
+            <SelectValue placeholder="Estado" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos los estados</SelectItem>
+            <SelectItem value="activo">Activo</SelectItem>
+            <SelectItem value="inactivo">Inactivo</SelectItem>
+            <SelectItem value="bloqueado">Bloqueado</SelectItem>
+          </SelectContent>
+        </Select>
 
-              {(searchTerm || statusFilter !== 'todos' || scoreFilter !== 'todos') && (
-                <Button variant="outline" size="sm" onClick={limpiarFiltros}>
-                  Limpiar
-                </Button>
-              )}
-            </div>
+        <Select value={scoreFilter} onValueChange={setScoreFilter}>
+          <SelectTrigger className="w-full md:w-[180px]">
+            <SelectValue placeholder="Credit Score" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos los scores</SelectItem>
+            <SelectItem value="excelente">Excelente (80+)</SelectItem>
+            <SelectItem value="bueno">Bueno (60-79)</SelectItem>
+            <SelectItem value="regular">Regular (40-59)</SelectItem>
+            <SelectItem value="bajo">Bajo (&lt;40)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Lista de Clientes */}
+      <div className="space-y-4">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            <span className="ml-2 text-gray-600">Cargando clientes...</span>
           </div>
-          
-          {(searchTerm || statusFilter !== 'todos' || scoreFilter !== 'todos') && (
-            <div className="mt-4 text-sm text-gray-600">
-              Mostrando {clientesFiltrados.length} de {clientes.length} clientes
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Clients List */}
-      <div className="grid gap-6">
-        {loading && clientes.length === 0 ? (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <div className="flex items-center justify-center space-x-2">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                <span className="text-lg text-gray-600">Cargando clientes...</span>
-              </div>
-            </CardContent>
-          </Card>
         ) : clientesFiltrados.length === 0 ? (
           <Card>
             <CardContent className="p-12 text-center">
               <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {clientes.length === 0 
-                  ? 'No tienes clientes registrados'
-                  : 'No se encontraron clientes'
+                {searchTerm || statusFilter !== 'todos' || scoreFilter !== 'todos' 
+                  ? 'No se encontraron clientes' 
+                  : 'No hay clientes registrados'
                 }
               </h3>
               <p className="text-gray-600 mb-6">
-                {clientes.length === 0 
-                  ? 'Comienza agregando tu primer cliente para gestionar préstamos'
-                  : 'Intenta ajustar los filtros de búsqueda o agregar un nuevo cliente'
+                {searchTerm || statusFilter !== 'todos' || scoreFilter !== 'todos'
+                  ? 'Intenta cambiar los filtros de búsqueda'
+                  : 'Comienza creando tu primer cliente o importa una lista existente'
                 }
               </p>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                {clientes.length === 0 ? (
-                  <Button onClick={handleNuevoCliente} className="bg-blue-600 hover:bg-blue-700">
+              {!searchTerm && statusFilter === 'todos' && scoreFilter === 'todos' && (
+                <div className="flex items-center justify-center gap-3">
+                  <Button onClick={handleNuevoCliente}>
                     <Plus className="h-4 w-4 mr-2" />
-                    Agregar Primer Cliente
+                    Crear Cliente
                   </Button>
-                ) : (
-                  <>
-                    <Button onClick={limpiarFiltros} variant="outline">
-                      Limpiar Filtros
-                    </Button>
-                    <Button onClick={handleNuevoCliente} className="bg-blue-600 hover:bg-blue-700">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Agregar Cliente
-                    </Button>
-                  </>
-                )}
-              </div>
+                  <Button variant="outline" onClick={() => setShowImportExport(true)}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Importar Clientes
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : (
           clientesFiltrados.map((cliente) => (
-            <Card key={cliente.id} className="hover:shadow-lg transition-shadow">
+            <Card key={cliente.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start space-x-4 flex-1">
-                    <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold text-lg">
-                      {cliente.nombre.charAt(0)}{cliente.apellido.charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2 flex-wrap">
-                        <h3 className="text-lg font-semibold text-gray-900">
-                          {cliente.nombre} {cliente.apellido}
-                        </h3>
-                        <Badge variant="outline" className="text-xs">
-                          {cliente.codigo}
-                        </Badge>
-                        <Badge className={getStatusColor(cliente.estado)}>
-                          {cliente.estado}
-                        </Badge>
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
+                        {cliente.nombre.charAt(0)}{cliente.apellido.charAt(0)}
                       </div>
                       
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 text-sm text-gray-600 mb-3">
-                        <div className="flex items-center gap-2">
-                          <Phone className="h-4 w-4 flex-shrink-0" />
-                          <span className="truncate">{cliente.telefono}</span>
-                        </div>
-                        {cliente.email && (
-                          <div className="flex items-center gap-2">
-                            <Mail className="h-4 w-4 flex-shrink-0" />
-                            <span className="truncate">{cliente.email}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4 flex-shrink-0" />
-                          <span className="truncate">{cliente.direccion}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Star className="h-4 w-4 flex-shrink-0" />
-                          <span>Score:</span>
-                          <Badge className={`${getScoreColor(cliente.creditScore)} ml-1`}>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-lg font-semibold text-gray-900">
+                            {cliente.nombre} {cliente.apellido}
+                          </h3>
+                          <Badge variant="outline">{cliente.codigo}</Badge>
+                          <Badge className={getStatusColor(cliente.estado)}>
+                            {cliente.estado}
+                          </Badge>
+                          <Badge className={getScoreColor(cliente.creditScore)}>
+                            <Star className="h-3 w-3 mr-1" />
                             {cliente.creditScore}
                           </Badge>
                         </div>
-                      </div>
 
-                      <div className="flex items-center gap-4 text-sm flex-wrap">
-                        <span className="text-gray-600">
-                          <strong>Ocupación:</strong> {cliente.ocupacion}
-                        </span>
-                        <span className="text-gray-600">
-                          <strong>Ingresos:</strong> {formatCurrency(cliente.ingresosMensuales)}
-                        </span>
-                        <span className="text-gray-600">
-                          <strong>Referencias:</strong> {cliente.referencias.length}
-                        </span>
-                      </div>
-
-                      {cliente.observaciones && (
-                        <div className="mt-3 p-2 bg-gray-50 rounded text-sm text-gray-700">
-                          <strong>Observaciones:</strong> {cliente.observaciones}
+                        <div className="flex items-center gap-4 text-sm flex-wrap">
+                          <span className="text-gray-600">
+                            <strong>Cédula:</strong> {cliente.cedula}
+                          </span>
+                          <span className="text-gray-600 flex items-center gap-1">
+                            <Phone className="h-3 w-3" />
+                            {cliente.telefono}
+                          </span>
+                          {cliente.email && (
+                            <span className="text-gray-600 flex items-center gap-1">
+                              <Mail className="h-3 w-3" />
+                              {cliente.email}
+                            </span>
+                          )}
+                          <span className="text-gray-600 flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {cliente.direccion.substring(0, 50)}{cliente.direccion.length > 50 ? '...' : ''}
+                          </span>
                         </div>
-                      )}
+
+                        <div className="flex items-center gap-4 text-sm flex-wrap mt-2">
+                          <span className="text-gray-600">
+                            <strong>Ocupación:</strong> {cliente.ocupacion}
+                          </span>
+                          <span className="text-gray-600">
+                            <strong>Ingresos:</strong> {formatCurrency(cliente.ingresosMensuales)}
+                          </span>
+                          <span className="text-gray-600">
+                            <strong>Referencias:</strong> {cliente.referencias.length}
+                          </span>
+                        </div>
+
+                        {cliente.observaciones && (
+                          <div className="mt-3 p-2 bg-gray-50 rounded text-sm text-gray-700">
+                            <strong>Observaciones:</strong> {cliente.observaciones}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -584,6 +578,14 @@ export default function ClientesPage() {
           }}
         />
       )}
+
+      {/* ✅ DIÁLOGO DE IMPORTAR/EXPORTAR */}
+      <ImportExportDialog
+        isOpen={showImportExport}
+        onClose={() => setShowImportExport(false)}
+        clientes={clientes}
+        onClientesImportados={handleClientesImportados}
+      />
 
       {/* Dialog de Confirmación de Eliminación */}
       <AlertDialog 

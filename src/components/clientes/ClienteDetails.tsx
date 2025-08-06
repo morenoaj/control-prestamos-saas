@@ -1,4 +1,4 @@
-// src/components/clientes/ClienteDetails.tsx
+// src/components/clientes/ClienteDetails.tsx - CORREGIDO
 'use client'
 
 import { useState } from 'react'
@@ -31,7 +31,7 @@ import {
   AlertCircle
 } from 'lucide-react'
 import { Cliente } from '@/types/database'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, convertirFecha } from '@/lib/utils' // ✅ IMPORTAR convertirFecha
 
 interface ClienteDetailsProps {
   cliente: Cliente
@@ -85,44 +85,27 @@ export function ClienteDetails({ cliente, isOpen, onClose, onEdit }: ClienteDeta
                   {cliente.estado}
                 </Badge>
               </div>
+              <DialogDescription className="flex items-center gap-2 mt-1">
+                <Calendar className="h-4 w-4" />
+                {/* ✅ USAR convertirFecha EN LUGAR DE toDate() DIRECTO */}
+                Registrado el {formatDate(convertirFecha(cliente.fechaRegistro))}
+              </DialogDescription>
             </div>
           </DialogTitle>
-          <DialogDescription>
-            Cliente registrado el {formatDate(cliente.fechaRegistro.toDate())}
-          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Score Crediticio Destacado */}
-          <Card className={`border-2 ${getScoreColor(cliente.creditScore)}`}>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  {getScoreIcon(cliente.creditScore)}
-                  <div>
-                    <h3 className="text-lg font-semibold">Score Crediticio</h3>
-                    <p className="text-sm opacity-80">Evaluación de riesgo crediticio</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-4xl font-bold">{cliente.creditScore}</div>
-                  <div className="text-sm font-medium">{getScoreLabel(cliente.creditScore)}</div>
-                </div>
-              </div>
-              <div className="mt-4">
-                <div className="w-full bg-gray-200 rounded-full h-3">
-                  <div 
-                    className={`h-3 rounded-full transition-all duration-500 ${
-                      cliente.creditScore >= 80 ? 'bg-green-500' :
-                      cliente.creditScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-                    }`}
-                    style={{ width: `${cliente.creditScore}%` }}
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Header con acciones */}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onEdit}>
+              <Edit className="h-4 w-4 mr-2" />
+              Editar Cliente
+            </Button>
+          </div>
 
+          <Separator />
+
+          {/* Grid principal */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Información Personal */}
             <Card>
@@ -148,8 +131,47 @@ export function ClienteDetails({ cliente, isOpen, onClose, onEdit }: ClienteDeta
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-500">Fecha de Registro</label>
-                    <p className="font-medium">{formatDate(cliente.fechaRegistro.toDate())}</p>
+                    <p className="font-medium flex items-center gap-2">
+                      <Calendar className="h-4 w-4" />
+                      {/* ✅ USAR convertirFecha AQUÍ TAMBIÉN */}
+                      {formatDate(convertirFecha(cliente.fechaRegistro))}
+                    </p>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Credit Score */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5" />
+                  Evaluación Crediticia
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="text-center">
+                  <div className="flex items-center justify-center gap-3 mb-2">
+                    {getScoreIcon(cliente.creditScore)}
+                    <div className="text-3xl font-bold">{cliente.creditScore}</div>
+                  </div>
+                  <Badge className={getScoreColor(cliente.creditScore)}>
+                    {getScoreLabel(cliente.creditScore)}
+                  </Badge>
+                </div>
+                
+                <div className="w-full bg-gray-200 rounded-full h-3">
+                  <div 
+                    className={`h-3 rounded-full transition-all duration-300 ${
+                      cliente.creditScore >= 80 ? 'bg-green-500' : 
+                      cliente.creditScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                    }`}
+                    style={{ width: `${cliente.creditScore}%` }}
+                  />
+                </div>
+                
+                <div className="text-sm text-gray-600 text-center">
+                  Puntuación basada en información personal y financiera
                 </div>
               </CardContent>
             </Card>
@@ -269,53 +291,12 @@ export function ClienteDetails({ cliente, isOpen, onClose, onEdit }: ClienteDeta
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-700 leading-relaxed">{cliente.observaciones}</p>
+                <p className="text-gray-700 whitespace-pre-wrap">
+                  {cliente.observaciones}
+                </p>
               </CardContent>
             </Card>
           )}
-
-          {/* Resumen de Actividad */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CreditCard className="h-5 w-5" />
-                Resumen de Actividad
-              </CardTitle>
-              <CardDescription>
-                Historial crediticio y transaccional
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="text-center p-4 bg-blue-50 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">0</div>
-                  <div className="text-sm text-gray-600">Préstamos Activos</div>
-                </div>
-                <div className="text-center p-4 bg-green-50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600">$0</div>
-                  <div className="text-sm text-gray-600">Total Prestado</div>
-                </div>
-                <div className="text-center p-4 bg-purple-50 rounded-lg">
-                  <div className="text-2xl font-bold text-purple-600">0</div>
-                  <div className="text-sm text-gray-600">Pagos Realizados</div>
-                </div>
-              </div>
-              <div className="mt-4 text-center text-sm text-gray-500">
-                📝 Los datos de actividad se mostrarán cuando se implementen los módulos de préstamos y pagos
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Footer con acciones */}
-        <div className="flex justify-end gap-3 pt-6 border-t">
-          <Button variant="outline" onClick={onClose}>
-            Cerrar
-          </Button>
-          <Button onClick={onEdit} className="bg-blue-600 hover:bg-blue-700">
-            <Edit className="h-4 w-4 mr-2" />
-            Editar Cliente
-          </Button>
         </div>
       </DialogContent>
     </Dialog>
