@@ -1,37 +1,43 @@
-// src/types/auth.ts
-export interface AuthUser {
-  uid: string;
-  email: string | null;
-  displayName: string | null;
-  photoURL: string | null;
-  emailVerified: boolean;
-}
-
-export interface UserSession {
-  user: AuthUser;
-  empresa: Empresa;
-  rol: UsuarioEmpresa['rol'];
-}
-
-// src/types/api.ts
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
-}
-
-export interface PaginatedResponse<T> extends ApiResponse<T[]> {
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
-}
-
-// src/types/database.ts
+// src/types/database.ts - ACTUALIZADO
 import { Timestamp } from 'firebase/firestore';
+
+// ✅ IMPORTAR TIPOS desde el archivo de préstamos
+import { TipoTasa, EstadoPrestamo } from './prestamos';
+
+// ... todas las interfaces existentes (Empresa, Usuario, Cliente, etc.) ...
+
+// ✅ INTERFACE PRESTAMO ACTUALIZADA
+export interface Prestamo {
+  id: string;
+  empresaId: string;
+  numero: string;
+  clienteId: string;
+  usuarioCreador: string;
+  monto: number;
+  tasaInteres: number;
+  tipoTasa: TipoTasa; // ✅ Usar el tipo definido en prestamos.ts
+  plazo?: number; // ✅ OPCIONAL para préstamos indefinidos
+  esPlazoIndefinido?: boolean; // ✅ NUEVO CAMPO
+  fechaInicio: Timestamp;
+  fechaVencimiento?: Timestamp; // ✅ OPCIONAL para préstamos indefinidos
+  metodoPago: string;
+  garantia?: string;
+  proposito: string;
+  estado: EstadoPrestamo; // ✅ Usar el tipo definido
+  saldoCapital: number;
+  interesesPendientes: number;
+  interesesPagados: number;
+  diasAtraso: number;
+  moraAcumulada: number;
+  fechaProximoPago?: Timestamp; // ✅ OPCIONAL para préstamos indefinidos
+  montoProximoPago?: number; // ✅ OPCIONAL para préstamos indefinidos
+  observaciones?: string;
+  ultimaActualizacionIntereses?: Timestamp; // ✅ NUEVO CAMPO para préstamos indefinidos
+}
+
+// ... resto de interfaces existentes (Empresa, Usuario, Cliente, Pago, etc.) ...
+
+// ✅ VERSIÓN COMPLETA DEL ARCHIVO (copia y pega esto):
 
 export interface Empresa {
   id: string;
@@ -106,33 +112,6 @@ export interface Referencia {
   telefono: string;
   relacion: string;
 }
-
-export interface Prestamo {
-  id: string;
-  empresaId: string;
-  numero: string;
-  clienteId: string;
-  usuarioCreador: string;
-  monto: number;
-  tasaInteres: number;
-  tipoTasa: 'quincenal' | 'mensual' | 'anual';
-  plazo: number;
-  fechaInicio: Timestamp;
-  fechaVencimiento: Timestamp;
-  metodoPago: string;
-  garantia?: string;
-  proposito: string;
-  estado: 'pendiente' | 'activo' | 'finalizado' | 'atrasado' | 'cancelado';
-  saldoCapital: number;
-  interesesPendientes: number;
-  interesesPagados: number;
-  diasAtraso: number;
-  moraAcumulada: number;
-  fechaProximoPago: Timestamp;
-  montoProximoPago: number;
-  observaciones?: string;
-}
-
 
 export interface Notificacion {
   id: string;

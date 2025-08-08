@@ -49,8 +49,8 @@ export function CronogramaPagos({ prestamo, className }: CronogramaPagosProps) {
     const montoCuota = calcularMontoCuotaFija(
       prestamo.monto, 
       prestamo.tasaInteres, 
-      prestamo.plazo, 
-      prestamo.tipoTasa
+      prestamo.plazo ?? 0, 
+      prestamo.tipoTasa === 'indefinido' ? undefined : prestamo.tipoTasa
     )
     
     // Calcular interés por período
@@ -74,7 +74,7 @@ export function CronogramaPagos({ prestamo, className }: CronogramaPagosProps) {
       ? prestamo.fechaInicio 
       : prestamo.fechaInicio.toDate()
 
-    for (let i = 1; i <= prestamo.plazo; i++) {
+    for (let i = 1; i <= (prestamo.plazo ?? 0); i++) {
       // Calcular fecha de la cuota
       const fechaCuota = new Date(fechaInicio)
       
