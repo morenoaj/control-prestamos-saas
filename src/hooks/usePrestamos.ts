@@ -1,4 +1,4 @@
-// ✅ ARCHIVO 1: src/hooks/usePrestamos.ts - CORREGIDO
+// ✅ ARCHIVO: src/hooks/usePrestamos.ts - COMPLETO CORREGIDO
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { Prestamo, Cliente } from '@/types/database'
+import { EstadoPrestamo } from '@/types/prestamos'
 import { useAuth } from '@/context/AuthContext'
 import { convertirFecha } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
@@ -68,10 +69,11 @@ const limpiarDatosParaFirebase = (data: any): any => {
   
   for (const [key, value] of Object.entries(data)) {
     if (value !== undefined && value !== null && value !== '') {
-      if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
-        const cleanedObject = limpiarDatosParaFirebase(value)
-        if (Object.keys(cleanedObject).length > 0) {
-          cleaned[key] = cleanedObject
+      if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof Timestamp)) {
+        // Procesar objetos anidados recursivamente
+        const cleanedNested = limpiarDatosParaFirebase(value)
+        if (Object.keys(cleanedNested).length > 0) {
+          cleaned[key] = cleanedNested
         }
       } else {
         cleaned[key] = value
@@ -82,28 +84,29 @@ const limpiarDatosParaFirebase = (data: any): any => {
   return cleaned
 }
 
-// Función para generar número de préstamo único
+// Función para generar número único de préstamo
 const generarNumeroPrestamo = async (empresaId: string): Promise<string> => {
-  const fecha = new Date()
-  const año = fecha.getFullYear().toString().slice(-2)
-  const mes = (fecha.getMonth() + 1).toString().padStart(2, '0')
+  const year = new Date().getFullYear()
   const timestamp = Date.now().toString().slice(-6)
-  
-  return `PR${año}${mes}${timestamp}`
+  return `PR${year}${timestamp}`
 }
 
-// ✅ FUNCIONES DE CÁLCULO MEJORADAS
+// ✅ FUNCIÓN DE CÁLCULO DE INTERESES SIMPLE
 export const calcularInteresesSimples = (
-  capital: number, 
-  tasaAnual: number, 
-  periodos: number, 
+  capital: number,
+  tasaAnual: number,
+  periodos: number,
   tipoPeriodo: 'quincenal' | 'mensual' | 'anual' | 'indefinido' = 'mensual'
 ): number => {
-  // ✅ Validación de entrada
-  if (!capital || !tasaAnual || !periodos || capital <= 0 || tasaAnual <= 0 || periodos <= 0) {
+  if (!capital || !tasaAnual || capital <= 0 || tasaAnual <= 0) {
     return 0
   }
 
+  // Para préstamos indefinidos, no calcular intereses totales
+  if (tipoPeriodo === 'indefinido' || !periodos || periodos <= 0) {
+    return 0
+  }
+  
   let tasaPorPeriodo: number
   
   switch (tipoPeriodo) {
@@ -111,22 +114,19 @@ export const calcularInteresesSimples = (
       tasaPorPeriodo = tasaAnual / 24 // 24 quincenas al año
       break
     case 'mensual':
-      tasaPorPeriodo = tasaAnual / 12 // 12 meses al año
+      tasaPorPeriodo = tasaAnual / 12
       break
     case 'anual':
-      tasaPorPeriodo = tasaAnual
-      break
-    case 'indefinido':
-      // Para indefinidos, calcular solo una quincena
       tasaPorPeriodo = tasaAnual
       break
     default:
       tasaPorPeriodo = tasaAnual / 12
   }
   
-  return capital * (tasaPorPeriodo / 100) * (tipoPeriodo === 'indefinido' ? 1 : periodos)
+  return (capital * tasaPorPeriodo * periodos) / 100
 }
 
+// ✅ FUNCIÓN DE CÁLCULO DE CUOTA FIJA
 export const calcularMontoCuotaFija = (
   capital: number,
   tasaAnual: number,
@@ -167,7 +167,7 @@ export const calcularMontoCuotaFija = (
   return capital * (tasaPorPeriodo * factor) / (factor - 1)
 }
 
-// ✅ RESTO DE FUNCIONES MANTENIDAS...
+// ✅ FUNCIÓN PARA CALCULAR DÍAS DE ATRASO
 export const calcularDiasAtraso = (fechaVencimiento: Date | any): number => {
   const hoy = new Date()
   const vencimiento = convertirFecha(fechaVencimiento)
@@ -176,6 +176,7 @@ export const calcularDiasAtraso = (fechaVencimiento: Date | any): number => {
   return Math.max(0, dias)
 }
 
+// ✅ FUNCIÓN PARA DETERMINAR ESTADO DEL PRÉSTAMO
 export const determinarEstadoPrestamo = (prestamo: Prestamo): Prestamo['estado'] => {
   const hoy = new Date()
   
@@ -183,7 +184,7 @@ export const determinarEstadoPrestamo = (prestamo: Prestamo): Prestamo['estado']
     return 'finalizado'
   }
 
-  // Para préstamos indefinidos, no usar fecha de vencimiento
+  // ✅ Para préstamos indefinidos, no usar fecha de vencimiento
   if (prestamo.esPlazoIndefinido || prestamo.tipoTasa === 'indefinido') {
     return prestamo.estado // Mantener estado actual
   }
@@ -300,16 +301,17 @@ export function usePrestamos(): UsePrestamosReturn {
       // Generar número único
       const numero = await generarNumeroPrestamo(empresaActual.id)
 
-      // ✅ DETECTAR SI ES PRÉSTAMO INDEFINIDO
+      // ✅ REFORZAR DETECCIÓN DE PRÉSTAMOS INDEFINIDOS
       const esPrestamoIndefinido = prestamoData.esPlazoIndefinido || 
                                   prestamoData.tipoTasa === 'indefinido' || 
                                   !prestamoData.plazo || 
                                   prestamoData.plazo <= 0
 
-      console.log('🔍 Tipo de préstamo:', {
+      console.log('🔍 Tipo de préstamo en hook:', {
         esIndefinido: esPrestamoIndefinido,
         plazo: prestamoData.plazo,
-        tipoTasa: prestamoData.tipoTasa
+        tipoTasa: prestamoData.tipoTasa,
+        esPlazoIndefinido: prestamoData.esPlazoIndefinido
       })
 
       // Calcular fechas
@@ -320,9 +322,10 @@ export function usePrestamos(): UsePrestamosReturn {
       let montoCuota = 0
 
       if (esPrestamoIndefinido) {
-        // ✅ PRÉSTAMOS INDEFINIDOS: Solo próxima fecha quincenal
+        // ✅ PRÉSTAMOS INDEFINIDOS: Solo próxima fecha quincenal, SIN fecha de vencimiento
         fechaProximoPago = calcularProximaFechaQuincenal(fechaInicio)
         montoCuota = prestamoData.monto * (prestamoData.tasaInteres / 100)
+        fechaVencimiento = null // ✅ EXPLÍCITAMENTE null
         
         console.log('📅 Préstamo indefinido - Próximo pago:', fechaProximoPago.toLocaleDateString())
       } else {
@@ -345,7 +348,7 @@ export function usePrestamos(): UsePrestamosReturn {
             break
         }
 
-        // Calcular intereses y cuota
+        // Calcular intereses y cuota para préstamos con plazo
         interesesTotales = calcularInteresesSimples(
           prestamoData.monto,
           prestamoData.tasaInteres,
@@ -363,51 +366,61 @@ export function usePrestamos(): UsePrestamosReturn {
         console.log('📅 Préstamo con plazo - Vencimiento:', fechaVencimiento?.toLocaleDateString())
       }
 
-      // ✅ CONSTRUIR OBJETO PRÉSTAMO CON VALIDACIONES
+      // ✅ CONSTRUIR OBJETO PRÉSTAMO FINAL
       const nuevoPrestamo = {
         ...prestamoData,
         empresaId: empresaActual.id,
         numero,
         usuarioCreador: user.uid,
         fechaInicio: fechaInicio,
-        // ✅ Solo incluir fechaVencimiento si NO es indefinido
-        ...(fechaVencimiento && { fechaVencimiento }),
+        // ✅ SOLO incluir fechaVencimiento si NO es indefinido
+        ...(fechaVencimiento && !esPrestamoIndefinido && { fechaVencimiento }),
+        // ✅ FORZAR plazo a undefined para préstamos indefinidos
+        plazo: esPrestamoIndefinido ? undefined : prestamoData.plazo,
+        // ✅ MARCAR EXPLÍCITAMENTE como indefinido
+        esPlazoIndefinido: esPrestamoIndefinido,
         saldoCapital: prestamoData.monto,
         interesesPendientes: interesesTotales,
         interesesPagados: 0,
         diasAtraso: 0,
         moraAcumulada: 0,
         fechaProximoPago: fechaProximoPago,
-        // ✅ Validar que montoCuota no sea NaN
         montoProximoPago: isNaN(montoCuota) || montoCuota <= 0 ? 
-          (prestamoData.monto * (prestamoData.tasaInteres / 100)) : // Fallback a intereses simples
-          montoCuota,
-        estado: 'activo' as const,
-        // ✅ Campos específicos para préstamos indefinidos
-        esPlazoIndefinido: esPrestamoIndefinido,
+          prestamoData.monto * (prestamoData.tasaInteres / 100) : montoCuota,
+        fechaCreacion: fechaInicio,
+        estado: 'activo' as EstadoPrestamo,
         ...(esPrestamoIndefinido && { ultimaActualizacionIntereses: fechaInicio })
       }
 
-      console.log('💰 Préstamo a guardar:', {
-        numero,
-        monto: nuevoPrestamo.montoProximoPago,
+      console.log('💾 Guardando préstamo:', {
+        numero: nuevoPrestamo.numero,
         esIndefinido: esPrestamoIndefinido,
-        fechaProximoPago: fechaProximoPago.toLocaleDateString()
+        tieneFechaVencimiento: !!nuevoPrestamo.fechaVencimiento,
+        tipoTasa: nuevoPrestamo.tipoTasa,
+        plazoFinal: nuevoPrestamo.plazo
       })
 
-      const datosLimpios = limpiarDatosParaFirebase(nuevoPrestamo)
-      const docRef = await addDoc(prestamosRef, datosLimpios)
+      // Limpiar datos antes de guardar
+      const datosBD = limpiarDatosParaFirebase(nuevoPrestamo)
+      const docRef = await addDoc(collection(db, 'prestamos'), datosBD)
       
-      console.log('✅ Préstamo creado con ID:', docRef.id)
-      return docRef.id
+      toast({
+        title: "Préstamo creado",
+        description: `Préstamo ${nuevoPrestamo.numero} creado exitosamente`,
+      })
 
+      return docRef.id
     } catch (error: any) {
-      console.error('❌ Error creando préstamo:', error)
-      throw new Error(error.message || 'Error al crear el préstamo')
+      console.error('❌ Error al crear préstamo:', error)
+      toast({
+        title: "Error",
+        description: error.message || 'Error al crear el préstamo',
+        variant: "destructive"
+      })
+      throw error
     }
   }, [empresaActual?.id, user?.uid, getPrestamosCollection])
 
-  // ✅ RESTO DE FUNCIONES MANTENIDAS...
   const actualizarPrestamo = useCallback(async (
     id: string, 
     prestamoData: Partial<Prestamo>
@@ -417,9 +430,9 @@ export function usePrestamos(): UsePrestamosReturn {
     }
 
     try {
-      console.log('📝 Actualizando préstamo:', id)
-      const datosLimpios = limpiarDatosParaFirebase(prestamoData)
+      console.log('🔄 Actualizando préstamo:', id, prestamoData)
       const prestamoRef = doc(db, 'prestamos', id)
+      const datosLimpios = limpiarDatosParaFirebase(prestamoData)
       await updateDoc(prestamoRef, datosLimpios)
       console.log('✅ Préstamo actualizado:', id)
     } catch (error: any) {

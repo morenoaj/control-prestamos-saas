@@ -1,4 +1,4 @@
-// ✅ ARCHIVO 2: src/components/prestamos/PrestamoCard.tsx - CORREGIDO
+// ✅ ARCHIVO: src/components/prestamos/PrestamoCard.tsx - CORREGIDO
 'use client'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -107,11 +107,19 @@ export function PrestamoCard({
   onRegisterPayment 
 }: PrestamoCardProps) {
 
-  // ✅ VERIFICAR SI ES PRÉSTAMO INDEFINIDO (con múltiples verificaciones)
-  const esPrestamoIndefinido = prestamo.esPlazoIndefinido || 
-                              prestamo.tipoTasa === 'indefinido' || 
+  // ✅ REFORZAR LÓGICA DE DETECCIÓN DE PRÉSTAMOS INDEFINIDOS
+  const esPrestamoIndefinido = prestamo.tipoTasa === 'indefinido' || 
+                              prestamo.esPlazoIndefinido || 
                               !prestamo.plazo || 
                               prestamo.plazo <= 0
+
+  // ✅ AGREGAR DEBUG TEMPORAL (remover en producción)
+  console.log('🔍 Verificación préstamo:', prestamo.numero, {
+    esPlazoIndefinido: prestamo.esPlazoIndefinido,
+    tipoTasa: prestamo.tipoTasa,
+    plazo: prestamo.plazo,
+    resultadoFinal: esPrestamoIndefinido
+  })
 
   // ✅ CALCULAR PRÓXIMO PAGO REAL CON VALIDACIONES
   const calcularProximoPagoReal = () => {
@@ -161,229 +169,206 @@ export function PrestamoCard({
     }
   }
 
-  // ✅ OBTENER COLOR DEL BADGE SEGÚN ESTADO
-  const getBadgeVariant = (estado: string) => {
-    switch (estado) {
+  const proximoPago = calcularProximoPagoReal()
+
+  const getBadgeVariant = () => {
+    switch (prestamo.estado) {
       case 'activo': return 'default'
       case 'atrasado': return 'destructive'
       case 'finalizado': return 'secondary'
-      case 'pendiente': return 'outline'
+      case 'cancelado': return 'outline'
       default: return 'default'
     }
   }
 
-  // ✅ OBTENER ICONO SEGÚN ESTADO
-  const getStatusIcon = (estado: string) => {
-    switch (estado) {
-      case 'activo': return <CheckCircle className="h-4 w-4 text-green-600" />
-      case 'atrasado': return <AlertTriangle className="h-4 w-4 text-red-600" />
-      case 'finalizado': return <CheckCircle className="h-4 w-4 text-gray-600" />
-      case 'pendiente': return <Clock className="h-4 w-4 text-yellow-600" />
-      default: return <Clock className="h-4 w-4" />
+  const getBadgeIcon = () => {
+    switch (prestamo.estado) {
+      case 'activo': return <CheckCircle className="h-3 w-3" />
+      case 'atrasado': return <AlertTriangle className="h-3 w-3" />
+      case 'finalizado': return <CheckCircle className="h-3 w-3" />
+      case 'cancelado': return <Clock className="h-3 w-3" />
+      default: return null
     }
   }
 
-  // ✅ CALCULAR DATOS DEL PRÓXIMO PAGO
-  const proximoPago = calcularProximoPagoReal()
-
   return (
-    <Card className={`transition-all hover:shadow-md ${
-      prestamo.estado === 'atrasado' ? 'border-red-200 bg-red-50' : 
-      prestamo.estado === 'finalizado' ? 'border-gray-200 bg-gray-50' : 
-      'border-gray-200'
-    }`}>
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
+    <Card className="p-4 space-y-4 border hover:shadow-md transition-all duration-200">
+      {/* ✅ HEADER CON NÚMERO Y ESTADO */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-100 p-2 rounded-lg">
+            <DollarSign className="h-5 w-5 text-blue-600" />
+          </div>
           <div>
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <DollarSign className="h-5 w-5 text-green-600" />
-              {prestamo.numero}
-            </CardTitle>
-            <CardDescription className="flex items-center gap-2 mt-1">
-              <User className="h-4 w-4" />
+            <h3 className="font-semibold text-lg">{prestamo.numero}</h3>
+            <p className="text-sm text-gray-600 flex items-center gap-1">
+              <User className="h-3 w-3" />
               {cliente.nombre} {cliente.apellido}
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant={getBadgeVariant(prestamo.estado)} className="flex items-center gap-1">
-              {getStatusIcon(prestamo.estado)}
-              {prestamo.estado.charAt(0).toUpperCase() + prestamo.estado.slice(1)}
-            </Badge>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-8 w-8 p-0">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {onViewDetails && (
-                  <DropdownMenuItem onClick={() => onViewDetails(prestamo)}>
-                    <Eye className="h-4 w-4 mr-2" />
-                    Ver Detalles
-                  </DropdownMenuItem>
-                )}
-                {onRegisterPayment && prestamo.estado !== 'finalizado' && (
-                  <DropdownMenuItem onClick={() => onRegisterPayment(prestamo)}>
-                    <DollarSign className="h-4 w-4 mr-2" />
-                    Registrar Pago
-                  </DropdownMenuItem>
-                )}
-                {onEdit && (
-                  <DropdownMenuItem onClick={() => onEdit(prestamo)}>
-                    <Edit className="h-4 w-4 mr-2" />
-                    Editar
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                {onDelete && (
-                  <DropdownMenuItem 
-                    className="text-red-600"
-                    onClick={() => onDelete(prestamo)}
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Eliminar
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-4">
-        {/* ✅ INFORMACIÓN BÁSICA DEL PRÉSTAMO */}
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-gray-600">Monto:</span>
-            <p className="font-semibold text-gray-900">{formatCurrency(prestamo.monto)}</p>
-          </div>
-          <div>
-            <span className="text-gray-600">Saldo:</span>
-            <p className="font-semibold text-blue-600">
-              {formatCurrency(prestamo.saldoCapital || prestamo.monto)}
             </p>
           </div>
         </div>
-
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-gray-600">Tasa:</span>
-            <p className="font-semibold">
-              {prestamo.tasaInteres}% {esPrestamoIndefinido ? 'quincenal' : prestamo.tipoTasa}
-            </p>
-          </div>
-          <div>
-            <span className="text-gray-600">Plazo:</span>
-            <p className="font-semibold">
-              {esPrestamoIndefinido ? (
-                <span className="text-purple-600 flex items-center gap-1">
-                  <Infinity className="h-4 w-4" />
-                  Indefinido
-                </span>
-              ) : prestamo.plazo ? (
-                `${prestamo.plazo} ${prestamo.tipoTasa}${prestamo.plazo > 1 ? 's' : ''}`
-              ) : (
-                <span className="text-purple-600 flex items-center gap-1">
-                  <Infinity className="h-4 w-4" />
-                  Indefinido
-                </span>
+        <div className="flex items-center gap-2">
+          <Badge variant={getBadgeVariant()} className="flex items-center gap-1">
+            {getBadgeIcon()}
+            {prestamo.estado}
+          </Badge>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="h-8 w-8 p-0">
+                <span className="sr-only">Abrir menú</span>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {onViewDetails && (
+                <DropdownMenuItem onClick={() => onViewDetails(prestamo)}>
+                  <Eye className="mr-2 h-4 w-4" />
+                  Ver detalles
+                </DropdownMenuItem>
               )}
-            </p>
-          </div>
-        </div>
-
-        {/* ✅ FECHAS - VENCIMIENTO "INDEFINIDO" PARA PRÉSTAMOS QUINCENALES */}
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-gray-600">Inicio:</span>
-            <p className="font-semibold">
-              {validarFecha(prestamo.fechaInicio)?.toLocaleDateString('es-PA') || 'No definida'}
-            </p>
-          </div>
-          <div>
-            <span className="text-gray-600">Vencimiento:</span>
-            <p className="font-semibold">
-              {esPrestamoIndefinido ? (
-                <span className="text-purple-600 flex items-center gap-1">
-                  <Infinity className="h-4 w-4" />
-                  Indefinido
-                </span>
-              ) : validarFecha(prestamo.fechaVencimiento) ? (
-                validarFecha(prestamo.fechaVencimiento)!.toLocaleDateString('es-PA')
-              ) : (
-                <span className="text-purple-600 flex items-center gap-1">
-                  <Infinity className="h-4 w-4" />
-                  Indefinido
-                </span>
+              {onEdit && (
+                <DropdownMenuItem onClick={() => onEdit(prestamo)}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  Editar
+                </DropdownMenuItem>
               )}
-            </p>
-          </div>
+              {onDelete && (
+                <DropdownMenuItem 
+                  onClick={() => onDelete(prestamo)}
+                  className="text-red-600"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Eliminar
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+      </div>
 
-        {/* ✅ PRÓXIMO PAGO - CON VALORES REALES Y SIN USDNaN */}
-        {prestamo.estado !== 'finalizado' && proximoPago.esValido && (
-          <Alert className={`border-blue-200 ${proximoPago.monto > 0 ? 'bg-blue-50' : 'bg-yellow-50'}`}>
-            <Calendar className={`h-4 w-4 ${proximoPago.monto > 0 ? 'text-blue-600' : 'text-yellow-600'}`} />
-            <AlertDescription>
-              <div className="space-y-2">
-                <div className={`font-semibold ${proximoPago.monto > 0 ? 'text-blue-900' : 'text-yellow-900'}`}>
-                  Próximo pago: {formatCurrency(proximoPago.monto)}
-                </div>
-                
-                <div className={proximoPago.monto > 0 ? 'text-blue-700' : 'text-yellow-700'}>
-                  <span className="font-medium">Fecha:</span> {proximoPago.fecha.toLocaleDateString('es-PA')}
-                </div>
-                
-                <div className="text-gray-600 text-xs">
+      {/* ✅ INFORMACIÓN PRINCIPAL - MONTO Y SALDO */}
+      <div className="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <span className="text-gray-600">Monto:</span>
+          <p className="font-semibold text-green-600">{formatCurrency(prestamo.monto)}</p>
+        </div>
+        <div>
+          <span className="text-gray-600">Saldo:</span>
+          <p className="font-semibold text-orange-600">
+            {formatCurrency(prestamo.saldoCapital || prestamo.monto)}
+          </p>
+        </div>
+      </div>
+
+      {/* ✅ INFORMACIÓN PRINCIPAL - TASA Y PLAZO CORREGIDOS */}
+      <div className="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <span className="text-gray-600">Tasa:</span>
+          <p className="font-semibold text-blue-600">
+            {prestamo.tasaInteres}% {prestamo.tipoTasa === 'indefinido' ? 'quincenal' : prestamo.tipoTasa}
+          </p>
+        </div>
+        <div>
+          <span className="text-gray-600">Plazo:</span>
+          <p className="font-semibold">
+            {/* ✅ CORREGIR: Mostrar "Indefinido" cuando tipoTasa es 'indefinido' */}
+            {prestamo.tipoTasa === 'indefinido' || prestamo.esPlazoIndefinido || !prestamo.plazo || prestamo.plazo <= 0 ? (
+              <span className="text-purple-600 flex items-center gap-1">
+                <Infinity className="h-4 w-4" />
+                Indefinido
+              </span>
+            ) : prestamo.plazo ? (
+              `${prestamo.plazo} ${prestamo.tipoTasa}${prestamo.plazo > 1 ? 's' : ''}`
+            ) : (
+              <span className="text-purple-600 flex items-center gap-1">
+                <Infinity className="h-4 w-4" />
+                Indefinido
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* ✅ FECHAS - VENCIMIENTO "INDEFINIDO" CORREGIDO */}
+      <div className="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <span className="text-gray-600">Inicio:</span>
+          <p className="font-semibold">
+            {validarFecha(prestamo.fechaInicio)?.toLocaleDateString('es-PA') || 'No definida'}
+          </p>
+        </div>
+        <div>
+          <span className="text-gray-600">Vencimiento:</span>
+          <p className="font-semibold">
+            {/* ✅ CORREGIR: Mostrar "Indefinido" cuando tipoTasa es 'indefinido' */}
+            {prestamo.tipoTasa === 'indefinido' || prestamo.esPlazoIndefinido || !prestamo.plazo || prestamo.plazo <= 0 ? (
+              <span className="text-purple-600 flex items-center gap-1">
+                <Infinity className="h-4 w-4" />
+                Indefinido
+              </span>
+            ) : validarFecha(prestamo.fechaVencimiento) ? (
+              validarFecha(prestamo.fechaVencimiento)!.toLocaleDateString('es-PA')
+            ) : (
+              <span className="text-purple-600 flex items-center gap-1">
+                <Infinity className="h-4 w-4" />
+                Indefinido
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {/* ✅ PRÓXIMO PAGO - CON VALORES REALES Y SIN USDNaN */}
+      {prestamo.estado !== 'finalizado' && proximoPago.esValido && (
+        <Alert className={`border-blue-200 ${proximoPago.monto > 0 ? 'bg-blue-50' : 'bg-yellow-50'}`}>
+          <Calendar className={`h-4 w-4 ${proximoPago.monto > 0 ? 'text-blue-600' : 'text-yellow-600'}`} />
+          <AlertDescription>
+            <div className="space-y-2">
+              <div className={`font-semibold ${proximoPago.monto > 0 ? 'text-blue-900' : 'text-yellow-900'}`}>
+                Próximo pago: {formatCurrency(proximoPago.monto)}
+              </div>
+              
+              <div className={proximoPago.monto > 0 ? 'text-blue-700' : 'text-yellow-700'}>
+                Fecha: {proximoPago.fecha.toLocaleDateString('es-PA')}
+              </div>
+              
+              {proximoPago.mensaje && (
+                <div className="text-xs text-gray-600">
                   {proximoPago.mensaje}
                 </div>
+              )}
 
-                {/* ✅ INFORMACIÓN ADICIONAL PARA PRÉSTAMOS QUINCENALES */}
-                {esPrestamoIndefinido && (
-                  <div className="text-purple-700 text-xs mt-2 p-2 bg-purple-100 rounded">
-                    <strong>Sistema Quincenal:</strong> Intereses cada 15 y 30 del mes + abono libre al capital
-                  </div>
-                )}
-              </div>
-            </AlertDescription>
-          </Alert>
-        )}
+              {onRegisterPayment && proximoPago.monto > 0 && (
+                <Button
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => onRegisterPayment(prestamo)}
+                >
+                  Registrar Pago
+                </Button>
+              )}
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
 
-        {/* ✅ ALERTA PARA DATOS INVÁLIDOS */}
-        {prestamo.estado !== 'finalizado' && !proximoPago.esValido && (
-          <Alert className="border-yellow-200 bg-yellow-50">
-            <AlertTriangle className="h-4 w-4 text-yellow-600" />
-            <AlertDescription className="text-yellow-800">
-              <div className="font-semibold">Datos incompletos</div>
-              <div className="text-sm">{proximoPago.mensaje}</div>
-            </AlertDescription>
-          </Alert>
-        )}
+      {/* ✅ PROPÓSITO */}
+      {prestamo.proposito && (
+        <div className="text-sm">
+          <span className="text-gray-600">Propósito:</span>
+          <p className="text-gray-800 mt-1">{prestamo.proposito}</p>
+        </div>
+      )}
 
-        {/* ✅ MENSAJE PARA PRÉSTAMOS FINALIZADOS */}
-        {prestamo.estado === 'finalizado' && (
-          <Alert className="border-gray-200 bg-gray-50">
-            <CheckCircle className="h-4 w-4 text-gray-600" />
-            <AlertDescription className="text-gray-700">
-              <span className="font-medium">✅ Préstamo finalizado</span>
-              <div className="text-sm mt-1">Capital completamente liquidado</div>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* ✅ BOTÓN RÁPIDO DE PAGO */}
-        {prestamo.estado !== 'finalizado' && onRegisterPayment && proximoPago.esValido && (
-          <Button 
-            onClick={() => onRegisterPayment(prestamo)}
-            className="w-full bg-green-600 hover:bg-green-700"
-          >
-            <DollarSign className="h-4 w-4 mr-2" />
-            Registrar Pago
-          </Button>
-        )}
-      </CardContent>
+      {/* ✅ OBSERVACIONES */}
+      {prestamo.observaciones && (
+        <div className="text-sm">
+          <span className="text-gray-600">Observaciones:</span>
+          <p className="text-gray-600 mt-1 italic">{prestamo.observaciones}</p>
+        </div>
+      )}
     </Card>
   )
 }
