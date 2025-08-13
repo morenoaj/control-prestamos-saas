@@ -459,13 +459,3 @@ export function usePagos(): UsePagosReturn {
     recargarPagos
   }
 }
-
-const { 
-  pagos, 
-  loading, 
-  error, 
-  crearPago,
-  eliminarPago,
-  recargarPagos,
-  procesarPagoAutomatico  // ✅ Agregar esta función
-} = usePagos()
