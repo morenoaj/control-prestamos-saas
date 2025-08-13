@@ -35,6 +35,10 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { PrestamoForm } from '@/components/prestamos/PrestamoForm'
+import { PagoForm } from '@/components/pagos/PagoForm'
+import { CronogramaPagos } from '@/components/prestamos/CronogramaPagos'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { usePagos } from '@/hooks/usePagos'
 import { 
   CreditCard, 
   Plus, 
@@ -64,17 +68,18 @@ import { toast } from '@/hooks/use-toast'
 export default function PrestamosPage() {
   const { empresaActual } = useAuth()
   const { clientes } = useClientes()
-  const { 
-    prestamos, 
-    loading, 
-    error, 
-    crearPrestamo, 
-    actualizarPrestamo, 
+  const {
+    prestamos,
+    loading,
+    error,
+    crearPrestamo,
+    actualizarPrestamo,
     eliminarPrestamo,
     calcularIntereses,
     calcularMontoCuota,
-    recargarPrestamos 
+    recargarPrestamos
   } = usePrestamos()
+  const { procesarPagoAutomatico } = usePagos()
 
   // Estados para UI
   const [searchTerm, setSearchTerm] = useState('')
@@ -83,6 +88,8 @@ export default function PrestamosPage() {
   const [prestamoEditando, setPrestamoEditando] = useState<Prestamo | null>(null)
   const [prestamoAEliminar, setPrestamoAEliminar] = useState<Prestamo | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [prestamoDetalle, setPrestamoDetalle] = useState<Prestamo | null>(null)
+  const [prestamoParaPago, setPrestamoParaPago] = useState<Prestamo | null>(null)
 
   // Préstamos filtrados
   const prestamosFiltrados = useMemo(() => {
@@ -175,6 +182,25 @@ export default function PrestamosPage() {
   const handleEditarPrestamo = (prestamo: Prestamo) => {
     setPrestamoEditando(prestamo)
     setShowPrestamoForm(true)
+  }
+
+  const handleVerDetalles = (prestamo: Prestamo) => {
+    setPrestamoDetalle(prestamo)
+  }
+
+  const handleRegistrarPago = (prestamo: Prestamo) => {
+    setPrestamoParaPago(prestamo)
+  }
+
+  const handlePagoRegistrado = async (
+    prestamoId: string,
+    montoPagado: number,
+    metodoPago: string,
+    referenciaPago?: string,
+    observaciones?: string
+  ) => {
+    await procesarPagoAutomatico(prestamoId, montoPagado, metodoPago, observaciones)
+    await recargarPrestamos()
   }
 
   const handleGuardarPrestamo = async (prestamoData: Omit<Prestamo, 'id' | 'empresaId' | 'numero' | 'fechaCreacion'>) => {
@@ -639,11 +665,11 @@ export default function PrestamosPage() {
                       <DropdownMenuContent align="end">
                         <DropdownMenuLabel>Acciones</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleVerDetalles(prestamo)}>
                           <Eye className="h-4 w-4 mr-2" />
                           Ver Detalles
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleRegistrarPago(prestamo)}>
                           <DollarSign className="h-4 w-4 mr-2" />
                           Registrar Pago
                         </DropdownMenuItem>
@@ -669,8 +695,42 @@ export default function PrestamosPage() {
         )}
       </div>
 
+      {/* Detalle del Préstamo */}
+      <Dialog open={!!prestamoDetalle} onOpenChange={() => setPrestamoDetalle(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>
+              Detalles del préstamo {prestamoDetalle?.numero}
+            </DialogTitle>
+          </DialogHeader>
+          {prestamoDetalle && (
+            <CronogramaPagos prestamo={prestamoDetalle} />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Formulario de Pago */}
+      <PagoForm
+        open={!!prestamoParaPago}
+        onOpenChange={(open) => {
+          if (!open) setPrestamoParaPago(null)
+        }}
+        prestamos={prestamoParaPago ? [{
+          id: prestamoParaPago.id,
+          numero: prestamoParaPago.numero,
+          clienteNombre: obtenerNombreCliente(prestamoParaPago.clienteId),
+          saldoCapital: prestamoParaPago.saldoCapital,
+          interesesPendientes: prestamoParaPago.interesesPendientes,
+          moraAcumulada: prestamoParaPago.moraAcumulada,
+          montoProximoPago: prestamoParaPago.montoProximoPago,
+          fechaProximoPago: prestamoParaPago.fechaProximoPago,
+          estado: prestamoParaPago.estado
+        }] : []}
+        onPagoRegistrado={handlePagoRegistrado}
+      />
+
       {/* Formulario de Préstamo */}
-      <PrestamoForm 
+      <PrestamoForm
         isOpen={showPrestamoForm}
         onClose={() => {
           setShowPrestamoForm(false)
