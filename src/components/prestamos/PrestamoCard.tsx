@@ -1,6 +1,4 @@
-// ===== COMPONENTE SIMPLIFICADO QUE FUNCIONA =====
-// src/components/prestamos/PrestamoCard.tsx
-
+// ✅ ARCHIVO 2: src/components/prestamos/PrestamoCard.tsx - CORREGIDO
 'use client'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,15 +28,15 @@ import {
 } from 'lucide-react'
 import { Prestamo, Cliente } from '@/types/database'
 
-// ✅ FUNCIÓN SIMPLE PARA FORMATEAR MONEDA (sin importaciones externas)
+// ✅ FUNCIÓN MEJORADA PARA FORMATEAR MONEDA (maneja NaN, undefined, null)
 const formatCurrency = (amount: number | undefined | null): string => {
   if (amount === undefined || amount === null || isNaN(amount)) {
-    return '$0.00';
+    return '$0.00'
   }
   
-  const validAmount = Number(amount);
-  if (isNaN(validAmount)) {
-    return '$0.00';
+  const validAmount = Number(amount)
+  if (isNaN(validAmount) || validAmount < 0) {
+    return '$0.00'
   }
   
   return new Intl.NumberFormat('en-US', {
@@ -46,32 +44,50 @@ const formatCurrency = (amount: number | undefined | null): string => {
     currency: 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  }).format(validAmount);
-};
+  }).format(validAmount)
+}
 
-// ✅ FUNCIÓN SIMPLE PARA CALCULAR PRÓXIMA FECHA QUINCENAL
+// ✅ FUNCIÓN MEJORADA PARA CALCULAR PRÓXIMA FECHA QUINCENAL
 const calcularProximaFechaQuincenal = (fechaActual: Date = new Date()): Date => {
-  const fecha = new Date(fechaActual);
-  const dia = fecha.getDate();
+  const fecha = new Date(fechaActual)
+  const dia = fecha.getDate()
   
   if (dia < 15) {
-    fecha.setDate(15);
+    fecha.setDate(15)
   } else if (dia === 15) {
-    fecha.setDate(30);
+    fecha.setDate(30)
     if (fecha.getDate() !== 30) {
-      fecha.setDate(0); // Último día del mes
+      fecha.setDate(0) // Último día del mes para febrero
     }
   } else if (dia < 30) {
-    fecha.setDate(30);
+    fecha.setDate(30)
     if (fecha.getDate() !== 30) {
-      fecha.setDate(0); // Último día del mes
+      fecha.setDate(0) // Último día del mes
     }
   } else {
-    fecha.setMonth(fecha.getMonth() + 1, 15);
+    fecha.setMonth(fecha.getMonth() + 1, 15)
   }
   
-  return fecha;
-};
+  return fecha
+}
+
+// ✅ FUNCIÓN PARA VALIDAR SI UNA FECHA ES VÁLIDA
+const validarFecha = (fecha: any): Date | null => {
+  if (!fecha) return null
+  
+  try {
+    if (fecha instanceof Date) {
+      return isNaN(fecha.getTime()) ? null : fecha
+    }
+    if (fecha.toDate && typeof fecha.toDate === 'function') {
+      const convertida = fecha.toDate()
+      return isNaN(convertida.getTime()) ? null : convertida
+    }
+    return null
+  } catch {
+    return null
+  }
+}
 
 interface PrestamoCardProps {
   prestamo: Prestamo
@@ -91,18 +107,59 @@ export function PrestamoCard({
   onRegisterPayment 
 }: PrestamoCardProps) {
 
-  // ✅ VERIFICAR SI ES PRÉSTAMO INDEFINIDO
-  const esPrestamoIndefinido = prestamo.esPlazoIndefinido || prestamo.tipoTasa === 'indefinido';
+  // ✅ VERIFICAR SI ES PRÉSTAMO INDEFINIDO (con múltiples verificaciones)
+  const esPrestamoIndefinido = prestamo.esPlazoIndefinido || 
+                              prestamo.tipoTasa === 'indefinido' || 
+                              !prestamo.plazo || 
+                              prestamo.plazo <= 0
 
-  // ✅ CALCULAR INTERESES QUINCENALES SIMPLE
-  const calcularInteresesQuincenales = (): number => {
-    if (!esPrestamoIndefinido) return 0;
-    
-    const saldoCapital = prestamo.saldoCapital || 0;
-    const tasaInteres = prestamo.tasaInteres || 0;
-    
-    return saldoCapital * (tasaInteres / 100);
-  };
+  // ✅ CALCULAR PRÓXIMO PAGO REAL CON VALIDACIONES
+  const calcularProximoPagoReal = () => {
+    // Validar datos básicos
+    const saldoCapital = prestamo.saldoCapital || prestamo.monto || 0
+    const tasaInteres = prestamo.tasaInteres || 0
+
+    if (saldoCapital <= 0 || tasaInteres <= 0) {
+      return {
+        monto: 0,
+        fecha: new Date(),
+        esValido: false,
+        mensaje: 'Datos insuficientes'
+      }
+    }
+
+    if (esPrestamoIndefinido) {
+      // ✅ PRÉSTAMOS QUINCENALES INDEFINIDOS
+      const interesesQuincenales = saldoCapital * (tasaInteres / 100)
+      const fechaProximoPago = calcularProximaFechaQuincenal()
+
+      return {
+        monto: interesesQuincenales,
+        fecha: fechaProximoPago,
+        esValido: true,
+        tipo: 'quincenal',
+        mensaje: 'Intereses quincenales + abono libre al capital'
+      }
+    } else {
+      // ✅ PRÉSTAMOS CON PLAZO FIJO
+      let montoProximoPago = prestamo.montoProximoPago || 0
+      let fechaProximoPago = validarFecha(prestamo.fechaProximoPago) || new Date()
+
+      // Si montoProximoPago es inválido, calcular cuota básica
+      if (isNaN(montoProximoPago) || montoProximoPago <= 0) {
+        const plazo = prestamo.plazo || 1
+        montoProximoPago = (saldoCapital + (saldoCapital * tasaInteres / 100)) / plazo
+      }
+
+      return {
+        monto: montoProximoPago,
+        fecha: fechaProximoPago,
+        esValido: !isNaN(montoProximoPago) && montoProximoPago > 0,
+        tipo: 'fijo',
+        mensaje: 'Cuota fija'
+      }
+    }
+  }
 
   // ✅ OBTENER COLOR DEL BADGE SEGÚN ESTADO
   const getBadgeVariant = (estado: string) => {
@@ -113,7 +170,7 @@ export function PrestamoCard({
       case 'pendiente': return 'outline'
       default: return 'default'
     }
-  };
+  }
 
   // ✅ OBTENER ICONO SEGÚN ESTADO
   const getStatusIcon = (estado: string) => {
@@ -124,7 +181,10 @@ export function PrestamoCard({
       case 'pendiente': return <Clock className="h-4 w-4 text-yellow-600" />
       default: return <Clock className="h-4 w-4" />
     }
-  };
+  }
+
+  // ✅ CALCULAR DATOS DEL PRÓXIMO PAGO
+  const proximoPago = calcularProximoPagoReal()
 
   return (
     <Card className={`transition-all hover:shadow-md ${
@@ -201,7 +261,9 @@ export function PrestamoCard({
           </div>
           <div>
             <span className="text-gray-600">Saldo:</span>
-            <p className="font-semibold text-blue-600">{formatCurrency(prestamo.saldoCapital)}</p>
+            <p className="font-semibold text-blue-600">
+              {formatCurrency(prestamo.saldoCapital || prestamo.monto)}
+            </p>
           </div>
         </div>
 
@@ -232,15 +294,12 @@ export function PrestamoCard({
           </div>
         </div>
 
-        {/* ✅ FECHAS - VENCIMIENTO SIEMPRE "INDEFINIDO" PARA PRÉSTAMOS QUINCENALES */}
+        {/* ✅ FECHAS - VENCIMIENTO "INDEFINIDO" PARA PRÉSTAMOS QUINCENALES */}
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <span className="text-gray-600">Inicio:</span>
             <p className="font-semibold">
-              {prestamo.fechaInicio instanceof Date ? 
-                prestamo.fechaInicio.toLocaleDateString('es-PA') :
-                prestamo.fechaInicio.toDate().toLocaleDateString('es-PA')
-              }
+              {validarFecha(prestamo.fechaInicio)?.toLocaleDateString('es-PA') || 'No definida'}
             </p>
           </div>
           <div>
@@ -251,10 +310,8 @@ export function PrestamoCard({
                   <Infinity className="h-4 w-4" />
                   Indefinido
                 </span>
-              ) : prestamo.fechaVencimiento ? (
-                prestamo.fechaVencimiento instanceof Date ?
-                  prestamo.fechaVencimiento.toLocaleDateString('es-PA') :
-                  prestamo.fechaVencimiento.toDate().toLocaleDateString('es-PA')
+              ) : validarFecha(prestamo.fechaVencimiento) ? (
+                validarFecha(prestamo.fechaVencimiento)!.toLocaleDateString('es-PA')
               ) : (
                 <span className="text-purple-600 flex items-center gap-1">
                   <Infinity className="h-4 w-4" />
@@ -265,51 +322,42 @@ export function PrestamoCard({
           </div>
         </div>
 
-        {/* ✅ PRÓXIMO PAGO - VERSIÓN SIMPLIFICADA QUE FUNCIONA */}
-        {esPrestamoIndefinido && prestamo.estado !== 'finalizado' && (
-          <Alert className="border-blue-200 bg-blue-50">
-            <Calendar className="h-4 w-4 text-blue-600" />
+        {/* ✅ PRÓXIMO PAGO - CON VALORES REALES Y SIN USDNaN */}
+        {prestamo.estado !== 'finalizado' && proximoPago.esValido && (
+          <Alert className={`border-blue-200 ${proximoPago.monto > 0 ? 'bg-blue-50' : 'bg-yellow-50'}`}>
+            <Calendar className={`h-4 w-4 ${proximoPago.monto > 0 ? 'text-blue-600' : 'text-yellow-600'}`} />
             <AlertDescription>
               <div className="space-y-2">
-                <div className="font-semibold text-blue-900">
-                  Próximo pago:
+                <div className={`font-semibold ${proximoPago.monto > 0 ? 'text-blue-900' : 'text-yellow-900'}`}>
+                  Próximo pago: {formatCurrency(proximoPago.monto)}
                 </div>
                 
-                <div className="text-blue-700">
-                  <span className="font-medium">Fecha:</span> {calcularProximaFechaQuincenal().toLocaleDateString('es-PA')}
+                <div className={proximoPago.monto > 0 ? 'text-blue-700' : 'text-yellow-700'}>
+                  <span className="font-medium">Fecha:</span> {proximoPago.fecha.toLocaleDateString('es-PA')}
                 </div>
                 
-                <div className="text-green-700">
-                  <span className="font-medium">Monto a cancelar:</span> {formatCurrency(calcularInteresesQuincenales())}
+                <div className="text-gray-600 text-xs">
+                  {proximoPago.mensaje}
                 </div>
-                
-                <div className="text-gray-600 text-xs mt-2">
-                  * Intereses de la quincena actual + abono libre al capital
-                </div>
+
+                {/* ✅ INFORMACIÓN ADICIONAL PARA PRÉSTAMOS QUINCENALES */}
+                {esPrestamoIndefinido && (
+                  <div className="text-purple-700 text-xs mt-2 p-2 bg-purple-100 rounded">
+                    <strong>Sistema Quincenal:</strong> Intereses cada 15 y 30 del mes + abono libre al capital
+                  </div>
+                )}
               </div>
             </AlertDescription>
           </Alert>
         )}
 
-        {/* ✅ PRÓXIMO PAGO PARA PRÉSTAMOS TRADICIONALES */}
-        {!esPrestamoIndefinido && prestamo.estado !== 'finalizado' && prestamo.fechaProximoPago && (
-          <Alert className="border-blue-200 bg-blue-50">
-            <Calendar className="h-4 w-4 text-blue-600" />
-            <AlertDescription>
-              <div className="space-y-1">
-                <div className="font-semibold text-blue-900">
-                  Próximo pago: {
-                    prestamo.fechaProximoPago instanceof Date ?
-                      prestamo.fechaProximoPago.toLocaleDateString('es-PA') :
-                      prestamo.fechaProximoPago.toDate().toLocaleDateString('es-PA')
-                  }
-                </div>
-                {prestamo.montoProximoPago && (
-                  <div className="text-green-700">
-                    <span className="font-medium">Monto:</span> {formatCurrency(prestamo.montoProximoPago)}
-                  </div>
-                )}
-              </div>
+        {/* ✅ ALERTA PARA DATOS INVÁLIDOS */}
+        {prestamo.estado !== 'finalizado' && !proximoPago.esValido && (
+          <Alert className="border-yellow-200 bg-yellow-50">
+            <AlertTriangle className="h-4 w-4 text-yellow-600" />
+            <AlertDescription className="text-yellow-800">
+              <div className="font-semibold">Datos incompletos</div>
+              <div className="text-sm">{proximoPago.mensaje}</div>
             </AlertDescription>
           </Alert>
         )}
@@ -326,7 +374,7 @@ export function PrestamoCard({
         )}
 
         {/* ✅ BOTÓN RÁPIDO DE PAGO */}
-        {prestamo.estado !== 'finalizado' && onRegisterPayment && (
+        {prestamo.estado !== 'finalizado' && onRegisterPayment && proximoPago.esValido && (
           <Button 
             onClick={() => onRegisterPayment(prestamo)}
             className="w-full bg-green-600 hover:bg-green-700"

@@ -1,4 +1,4 @@
-// src/types/prestamos.ts
+// ✅ ARCHIVO 4: src/types/prestamos.ts - CORREGIDO Y COMPLETO
 import { z } from 'zod';
 
 // ✅ DEFINIR TIPOS CONSTANTES PRIMERO (esto solucionará el error de TypeScript)
@@ -72,7 +72,7 @@ export interface DistribucionPago {
   sobrante: number;
 }
 
-// ✅ FUNCIONES DE UTILIDAD
+// ✅ FUNCIONES DE UTILIDAD MEJORADAS
 /**
  * Formatea un número como moneda USD, manejando casos de NaN y undefined
  */
@@ -283,99 +283,100 @@ export const calcularInteresesQuincenales = (
  */
 export const formatearProximoPago = (calculo: CalculoQuincenal): string => {
   const fecha = calculo.proximaFechaPago.toLocaleDateString('es-PA');
+  const monto = formatCurrency(calculo.totalAPagar);
   
   if (calculo.interesesAtrasados > 0) {
-    return `${fecha} - ${formatCurrency(calculo.totalAPagar)} (${calculo.periodosVencidos.length} quincenas atrasadas)`;
-  } else {
-    return `${fecha} - ${formatCurrency(calculo.interesesActuales)} (intereses actuales)`;
+    return `${monto} - ${fecha} (Incluye ${formatCurrency(calculo.interesesAtrasados)} vencidos)`;
   }
+  
+  return `${monto} - ${fecha} (Intereses quincenales)`;
 };
 
 /**
- * Obtiene el estado del préstamo basado en los pagos
+ * ✅ NUEVA FUNCIÓN: Validar si un préstamo es indefinido
  */
-export const obtenerEstadoPrestamo = (
-  calculo: CalculoQuincenal,
-  saldoCapital: number
-): 'activo' | 'atrasado' | 'finalizado' => {
-  if (saldoCapital <= 0.01) {
-    return 'finalizado';
+export const esPrestamoIndefinido = (prestamo: {
+  esPlazoIndefinido?: boolean;
+  tipoTasa?: string;
+  plazo?: number;
+}): boolean => {
+  return prestamo.esPlazoIndefinido || 
+         prestamo.tipoTasa === 'indefinido' || 
+         !prestamo.plazo || 
+         prestamo.plazo <= 0;
+};
+
+/**
+ * ✅ NUEVA FUNCIÓN: Calcular monto válido para próximo pago
+ */
+export const calcularMontoProximoPagoSeguro = (
+  prestamo: {
+    monto: number;
+    saldoCapital?: number;
+    tasaInteres: number;
+    esPlazoIndefinido?: boolean;
+    tipoTasa?: string;
+    plazo?: number;
+    montoProximoPago?: number;
   }
-  
-  if (calculo.periodosVencidos.length > 0) {
-    return 'atrasado';
-  }
-  
-  return 'activo';
-};
-
-// ✅ FUNCIONES PARA SISTEMA DIARIO (mantenidas por compatibilidad)
-export const calcularInteresesAcumulados = (
-  capitalActual: number,
-  tasaInteresAnual: number,
-  fechaUltimaActualizacion: Date,
-  fechaActual: Date = new Date()
-): CalculoIntereses => {
-  const diasTranscurridos = Math.floor(
-    (fechaActual.getTime() - fechaUltimaActualizacion.getTime()) / (1000 * 60 * 60 * 24)
-  );
-  
-  if (diasTranscurridos <= 0) {
-    return {
-      interesesDiarios: 0,
-      interesesAcumulados: 0,
-      diasTranscurridos: 0
-    };
-  }
-
-  const tasaDiaria = tasaInteresAnual / 365 / 100;
-  const interesesDiarios = capitalActual * tasaDiaria;
-  const interesesAcumulados = interesesDiarios * diasTranscurridos;
-
-  return {
-    interesesDiarios,
-    interesesAcumulados,
-    diasTranscurridos
-  };
-};
-
-export const distribuirPago = (
-  montoPagado: number,
-  saldoCapital: number,
-  interesesPendientes: number,
-  moraAcumulada: number
-): DistribucionPago => {
-  let montoRestante = montoPagado;
-
-  // 1. Primero se paga la mora
-  const montoMora = Math.min(montoRestante, moraAcumulada);
-  montoRestante -= montoMora;
-
-  // 2. Luego los intereses
-  const montoIntereses = Math.min(montoRestante, interesesPendientes);
-  montoRestante -= montoIntereses;
-
-  // 3. Finalmente el capital
-  const montoCapital = Math.min(montoRestante, saldoCapital);
-  montoRestante -= montoCapital;
-
-  return {
-    montoMora,
-    montoIntereses,
-    montoCapital,
-    sobrante: montoRestante
-  };
-};
-
-export const estaPrestamoFinalizado = (saldoCapital: number): boolean => {
-  return saldoCapital <= 0.01; // Considerar centavos como finalizado
-};
-
-export const calcularPagoSugeridoIndefinido = (
-  saldoCapital: number,
-  interesesPendientes: number,
-  porcentajeCapital: number = 0.1 // 10% del capital por defecto
 ): number => {
-  const pagoCapital = saldoCapital * porcentajeCapital;
-  return pagoCapital + interesesPendientes;
+  const saldoCapital = prestamo.saldoCapital || prestamo.monto || 0;
+  const tasaInteres = prestamo.tasaInteres || 0;
+
+  // Validación básica
+  if (saldoCapital <= 0 || tasaInteres <= 0) {
+    return 0;
+  }
+
+  // Para préstamos indefinidos, calcular intereses quincenales
+  if (esPrestamoIndefinido(prestamo)) {
+    return saldoCapital * (tasaInteres / 100);
+  }
+
+  // Para préstamos con plazo fijo, usar el monto existente o calcular básico
+  let montoCalculado = prestamo.montoProximoPago || 0;
+  
+  if (isNaN(montoCalculado) || montoCalculado <= 0) {
+    const plazo = prestamo.plazo || 1;
+    montoCalculado = (saldoCapital + (saldoCapital * tasaInteres / 100)) / plazo;
+  }
+
+  return isNaN(montoCalculado) ? 0 : montoCalculado;
+};
+
+/**
+ * ✅ NUEVA FUNCIÓN: Validar datos de préstamo antes de guardar
+ */
+export const validarDatosPrestamo = (prestamo: any): { esValido: boolean; errores: string[] } => {
+  const errores: string[] = [];
+
+  // Validaciones básicas
+  if (!prestamo.monto || prestamo.monto < 5) {
+    errores.push('El monto debe ser mayor a $5');
+  }
+
+  if (!prestamo.tasaInteres || prestamo.tasaInteres <= 0) {
+    errores.push('La tasa de interés debe ser mayor a 0');
+  }
+
+  if (!prestamo.clienteId) {
+    errores.push('Debe seleccionar un cliente');
+  }
+
+  // Validar plazo para préstamos no indefinidos
+  const esIndefinido = esPrestamoIndefinido(prestamo);
+  if (!esIndefinido && (!prestamo.plazo || prestamo.plazo <= 0)) {
+    errores.push('Para préstamos con plazo fijo, debe especificar la duración');
+  }
+
+  // Validar montoProximoPago
+  const montoProximoPago = calcularMontoProximoPagoSeguro(prestamo);
+  if (isNaN(montoProximoPago) || montoProximoPago <= 0) {
+    errores.push('No se pudo calcular el monto del próximo pago');
+  }
+
+  return {
+    esValido: errores.length === 0,
+    errores
+  };
 };

@@ -1,4 +1,4 @@
-// src/components/prestamos/PrestamoForm.tsx - CON SISTEMA QUINCENAL
+// ✅ ARCHIVO 3: src/components/prestamos/PrestamoForm.tsx - CORREGIDO
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -46,14 +46,14 @@ import { Prestamo, Cliente } from '@/types/database'
 import { 
   prestamoSchema, 
   PrestamoFormData, 
-  TipoTasa 
+  TipoTasa,
+  formatCurrency
 } from '@/types/prestamos'
 import { useClientes } from '@/hooks/useClientes'
 import { calcularInteresesSimples, calcularMontoCuotaFija } from '@/hooks/usePrestamos'
-import { formatCurrency } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 
-// ✅ NUEVA FUNCIÓN: Calcular próxima fecha quincenal (15 y 30)
+// ✅ FUNCIÓN MEJORADA: Calcular próxima fecha quincenal (15 y 30)
 const calcularFechaProximaQuincena = (fechaBase: Date): Date => {
   const fecha = new Date(fechaBase)
   const dia = fecha.getDate()
@@ -119,13 +119,27 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
 
   const watchedFields = watch()
 
-  // ✅ CALCULAR VALORES con nueva lógica quincenal
+  // ✅ CALCULAR VALORES CON VALIDACIONES MEJORADAS
   useEffect(() => {
     if (watchedFields.monto && watchedFields.tasaInteres && watchedFields.tipoTasa) {
       const monto = Number(watchedFields.monto)
       const tasa = Number(watchedFields.tasaInteres)
       const tipoTasa = watchedFields.tipoTasa
       const esPlazoIndefinido = watchedFields.esPlazoIndefinido
+      const plazo = watchedFields.plazo
+
+      // ✅ VALIDACIONES DE ENTRADA
+      if (monto <= 0 || tasa <= 0) {
+        setCalculatedValues({
+          interesesTotales: 0,
+          montoCuota: 0,
+          montoTotal: 0,
+          fechaVencimiento: '',
+          interesesPorQuincena: 0,
+          proximaQuincena: '',
+        })
+        return
+      }
 
       if (esPlazoIndefinido || tipoTasa === 'indefinido') {
         // ✅ NUEVA LÓGICA: Sistema quincenal (15 y 30 de cada mes)
@@ -141,8 +155,8 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
           interesesPorQuincena,
           proximaQuincena: fechaProximaQuincena.toLocaleDateString('es-PA'),
         })
-      } else if (watchedFields.plazo && typeof watchedFields.plazo === 'number') {
-        const plazo = watchedFields.plazo
+      } else if (plazo && typeof plazo === 'number' && plazo > 0) {
+        // ✅ PRÉSTAMOS CON PLAZO FIJO - CON VALIDACIONES
         const intereses = calcularInteresesSimples(monto, tasa, plazo, tipoTasa)
         const cuota = calcularMontoCuotaFija(monto, tasa, plazo, tipoTasa)
         const montoTotal = monto + intereses
@@ -163,14 +177,15 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
         }
 
         setCalculatedValues({
-          interesesTotales: intereses,
-          montoCuota: cuota,
-          montoTotal: montoTotal,
+          interesesTotales: isNaN(intereses) ? 0 : intereses,
+          montoCuota: isNaN(cuota) ? 0 : cuota,
+          montoTotal: isNaN(montoTotal) ? monto : montoTotal,
           fechaVencimiento: fechaVencimiento.toLocaleDateString('es-PA'),
           interesesPorQuincena: 0,
           proximaQuincena: '',
         })
       } else {
+        // ✅ DATOS INSUFICIENTES
         setCalculatedValues({
           interesesTotales: 0,
           montoCuota: 0,
@@ -183,6 +198,7 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
     }
   }, [watchedFields.monto, watchedFields.tasaInteres, watchedFields.plazo, watchedFields.tipoTasa, watchedFields.esPlazoIndefinido])
 
+  // ✅ SUBMIT MEJORADO CON VALIDACIONES
   const onSubmit = async (data: PrestamoFormData) => {
     setIsLoading(true)
     
@@ -192,7 +208,18 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
         throw new Error('Cliente no encontrado')
       }
 
-      const esPrestamoIndefinido = data.esPlazoIndefinido || data.tipoTasa === 'indefinido'
+      // ✅ DETECTAR TIPO DE PRÉSTAMO CON MÚLTIPLES VERIFICACIONES
+      const esPrestamoIndefinido = data.esPlazoIndefinido || 
+                                  data.tipoTasa === 'indefinido' || 
+                                  !data.plazo || 
+                                  data.plazo <= 0
+
+      console.log('📋 Creando préstamo:', {
+        tipo: esPrestamoIndefinido ? 'Indefinido' : 'Plazo fijo',
+        monto: data.monto,
+        tasa: data.tasaInteres,
+        plazo: data.plazo
+      })
 
       const prestamoData: Omit<Prestamo, 'id' | 'empresaId' | 'numero' | 'fechaCreacion'> = {
         clienteId: data.clienteId,
@@ -212,13 +239,14 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
         interesesPagados: 0,
         diasAtraso: 0,
         moraAcumulada: 0,
-        // ✅ Para préstamos indefinidos, establecer próxima fecha quincenal
+        // ✅ CÁLCULO CORRECTO PARA PRÓXIMO PAGO
         fechaProximoPago: esPrestamoIndefinido ? 
           calcularFechaProximaQuincena(new Date()) as any : 
           new Date() as any,
+        // ✅ VALIDAR QUE montoProximoPago NO SEA NaN
         montoProximoPago: esPrestamoIndefinido ? 
           calculatedValues.interesesPorQuincena : 
-          calculatedValues.montoCuota,
+          (calculatedValues.montoCuota > 0 ? calculatedValues.montoCuota : data.monto * (data.tasaInteres / 100)),
         ultimaActualizacionIntereses: esPrestamoIndefinido ? new Date() as any : undefined,
         ...(data.garantia && data.garantia.trim() && {
           garantia: data.garantia.trim()
@@ -227,6 +255,18 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
           observaciones: data.observaciones.trim()
         }),
       }
+
+      // ✅ VALIDACIÓN FINAL ANTES DE GUARDAR
+      if (isNaN(prestamoData.montoProximoPago ?? 0) || (prestamoData.montoProximoPago ?? 0) <= 0) {
+        console.warn('⚠️ montoProximoPago inválido, usando fallback')
+        prestamoData.montoProximoPago = data.monto * (data.tasaInteres / 100)
+      }
+
+      console.log('💰 Préstamo final a guardar:', {
+        numero: 'Pendiente',
+        montoProximoPago: prestamoData.montoProximoPago,
+        esIndefinido: esPrestamoIndefinido
+      })
       
       await onSave(prestamoData)
       
@@ -713,8 +753,10 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
                     )}
                   </div>
 
-                  {/* Alertas */}
-                  {!(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && calculatedValues.interesesTotales > 0 && watchedFields.monto > 0 && (
+                  {/* ✅ ALERTAS CON VALIDACIONES */}
+                  {!(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && 
+                   calculatedValues.interesesTotales > 0 && 
+                   watchedFields.monto > 0 && (
                     <Alert className="bg-green-50 border-green-200">
                       <AlertCircle className="h-4 w-4 text-green-600" />
                       <AlertDescription className="text-green-800">
@@ -727,7 +769,8 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
                   )}
 
                   {/* ✅ NUEVA ALERTA para préstamos quincenales */}
-                  {(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && (
+                  {(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && 
+                   calculatedValues.interesesPorQuincena > 0 && (
                     <Alert className="bg-purple-50 border-purple-200">
                       <Calendar className="h-4 w-4 text-purple-600" />
                       <AlertDescription className="text-purple-800">
@@ -738,7 +781,7 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
                 </CardContent>
               </Card>
 
-              {/* ✅ NUEVA INFORMACIÓN específica para sistema quincenal */}
+              {/* ✅ INFORMACIÓN específica para sistema quincenal */}
               {(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && (
                 <Card className="border-purple-200">
                   <CardHeader>
@@ -794,41 +837,6 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
                 </Card>
               )}
 
-              {/* Cronograma para préstamos fijos */}
-              {watchedFields.plazo && typeof watchedFields.plazo === 'number' && calculatedValues.montoCuota > 0 && !(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Calendar className="h-5 w-5" />
-                      Cronograma Simplificado
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span>Número de cuotas:</span>
-                        <span className="font-semibold">{watchedFields.plazo}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Frecuencia:</span>
-                        <span className="font-semibold capitalize">{watchedFields.tipoTasa}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Cuota fija:</span>
-                        <span className="font-semibold text-green-600">
-                          {formatCurrency(calculatedValues.montoCuota)}
-                        </span>
-                      </div>
-                      <div className="pt-2 border-t">
-                        <p className="text-xs text-gray-600">
-                          Cronograma de cuotas fijas con interés simple
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
               {/* Análisis de Riesgo */}
               {clienteSeleccionado && (
                 <Card>
@@ -851,8 +859,36 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
                         </span>
                       </div>
                       
+                      {/* ✅ ANÁLISIS específico para préstamos quincenales */}
+                      {(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && (
+                        <>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm">Intereses Mensuales:</span>
+                            <span className="text-sm font-semibold">
+                              {formatCurrency(calculatedValues.interesesPorQuincena * 2)}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm">% de Ingresos:</span>
+                            <span className="text-sm font-semibold">
+                              {(((calculatedValues.interesesPorQuincena * 2) / clienteSeleccionado.ingresosMensuales) * 100).toFixed(1)}%
+                            </span>
+                          </div>
+
+                          <Alert className="border-purple-200 bg-purple-50">
+                            <Calendar className="h-4 w-4 text-purple-600" />
+                            <AlertDescription className="text-purple-800">
+                              <strong>Sistema Flexible:</strong> Ideal para clientes con ingresos variables. 
+                              Pueden abonar al capital cuando tengan disponibilidad.
+                            </AlertDescription>
+                          </Alert>
+                        </>
+                      )}
+
                       {/* Análisis para préstamos con plazo fijo */}
-                      {!(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && calculatedValues.montoCuota > 0 && (
+                      {!(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && 
+                       calculatedValues.montoCuota > 0 && (
                         <>
                           <div className="flex justify-between items-center">
                             <span className="text-sm">Capacidad de Pago:</span>
@@ -880,33 +916,6 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
                                 ? '⚠️ Alta carga de pago (>30% ingresos)'
                                 : '✅ Carga de pago aceptable'
                               }
-                            </AlertDescription>
-                          </Alert>
-                        </>
-                      )}
-
-                      {/* ✅ ANÁLISIS específico para préstamos quincenales */}
-                      {(watchedFields.esPlazoIndefinido || watchedFields.tipoTasa === 'indefinido') && (
-                        <>
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm">Intereses Mensuales:</span>
-                            <span className="text-sm font-semibold">
-                              {formatCurrency(calculatedValues.interesesPorQuincena * 2)}
-                            </span>
-                          </div>
-
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm">% de Ingresos:</span>
-                            <span className="text-sm font-semibold">
-                              {(((calculatedValues.interesesPorQuincena * 2) / clienteSeleccionado.ingresosMensuales) * 100).toFixed(1)}%
-                            </span>
-                          </div>
-
-                          <Alert className="border-purple-200 bg-purple-50">
-                            <Calendar className="h-4 w-4 text-purple-600" />
-                            <AlertDescription className="text-purple-800">
-                              <strong>Sistema Flexible:</strong> Ideal para clientes con ingresos variables. 
-                              Pueden abonar al capital cuando tengan disponibilidad.
                             </AlertDescription>
                           </Alert>
                         </>
