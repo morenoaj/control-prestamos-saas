@@ -697,6 +697,7 @@ export default function PrestamosPage() {
 
       {/* Detalle del Préstamo */}
       <Dialog open={!!prestamoDetalle} onOpenChange={() => setPrestamoDetalle(null)}>
+codex/add-functionality-for-loan-actions-la0yct
         <DialogContent className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
