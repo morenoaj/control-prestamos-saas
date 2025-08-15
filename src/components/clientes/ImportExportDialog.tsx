@@ -1,4 +1,4 @@
-// src/components/clientes/ImportExportDialog.tsx - COMPLETO CON SOPORTE EXCEL
+// src/components/clientes/ImportExportDialog.tsx - COMPLETO CORREGIDO
 'use client'
 
 import { useState, useRef } from 'react'
@@ -166,25 +166,25 @@ export function ImportExportDialog({
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">1</div>
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-medium">1</span>
                       <div>
                         <p className="font-medium">Descarga la plantilla</p>
-                        <p className="text-sm text-gray-600">Usa nuestra plantilla CSV o Excel con ejemplos</p>
+                        <p className="text-sm text-gray-600">Usa nuestras plantillas CSV o Excel como base</p>
                       </div>
                     </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">2</div>
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-medium">2</span>
                       <div>
                         <p className="font-medium">Completa los datos</p>
-                        <p className="text-sm text-gray-600">Llena la información de tus clientes</p>
+                        <p className="text-sm text-gray-600">Rellena la información de tus clientes</p>
                       </div>
                     </div>
-                    <div className="flex items-start gap-3">
-                      <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-semibold">3</div>
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-medium">3</span>
                       <div>
                         <p className="font-medium">Sube el archivo</p>
-                        <p className="text-sm text-gray-600">Arrastra o selecciona tu archivo CSV/Excel</p>
+                        <p className="text-sm text-gray-600">Arrastra o selecciona tu archivo completado</p>
                       </div>
                     </div>
                   </div>
@@ -193,18 +193,19 @@ export function ImportExportDialog({
                     <Button 
                       onClick={() => descargarPlantilla('csv')}
                       variant="outline" 
+                      size="sm"
                       className="w-full"
                     >
-                      <Download className="h-4 w-4 mr-2" />
+                      <FileText className="h-4 w-4 mr-2" />
                       Descargar Plantilla CSV
                     </Button>
-
                     <Button 
                       onClick={() => descargarPlantilla('excel')}
                       variant="outline" 
-                      className="w-full bg-green-50 hover:bg-green-100 border-green-200"
+                      size="sm"
+                      className="w-full"
                     >
-                      <Download className="h-4 w-4 mr-2" />
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
                       Descargar Plantilla Excel
                     </Button>
                   </div>
@@ -212,9 +213,7 @@ export function ImportExportDialog({
                   <Alert>
                     <AlertCircle className="h-4 w-4" />
                     <AlertDescription>
-                      <strong>Archivos soportados:</strong> CSV y Excel (.xlsx)<br/>
-                      <strong>Campos obligatorios:</strong> Nombre, Apellido, Cédula, Teléfono, Dirección, Ocupación.<br/>
-                      <strong>Referencias en Excel:</strong> Hasta 3 referencias en columnas separadas
+                      Los campos obligatorios son: Nombre, Apellido, Cédula y Teléfono
                     </AlertDescription>
                   </Alert>
                 </CardContent>
@@ -223,14 +222,11 @@ export function ImportExportDialog({
               {/* Área de subida */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Upload className="h-5 w-5" />
-                    Subir Archivo
-                  </CardTitle>
+                  <CardTitle className="text-lg">Subir Archivo</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div
-                    className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                    className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
                       dragOver 
                         ? 'border-blue-500 bg-blue-50' 
                         : 'border-gray-300 hover:border-gray-400'
@@ -349,44 +345,49 @@ export function ImportExportDialog({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="text-center p-4 bg-blue-50 rounded-lg">
-                      <div className="text-2xl font-bold text-blue-600">{clientes.length}</div>
-                      <div className="text-sm text-gray-600">Total Clientes</div>
-                    </div>
-                    <div className="text-center p-4 bg-green-50 rounded-lg">
-                      <div className="text-2xl font-bold text-green-600">
-                        {clientes.filter(c => c.estado === 'activo').length}
-                      </div>
-                      <div className="text-sm text-gray-600">Activos</div>
-                    </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-blue-600">{clientes.length}</div>
+                    <p className="text-gray-600">Clientes registrados</p>
                   </div>
 
-                  <Alert>
-                    <CheckCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      Se exportarán todos los clientes con información completa incluyendo:
-                      datos personales, contacto, información laboral y referencias.
-                    </AlertDescription>
-                  </Alert>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Activos:</span>
+                      <span className="font-medium text-green-600">
+                        {clientes.filter(c => c.estado === 'activo').length}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Inactivos:</span>
+                      <span className="font-medium text-gray-600">
+                        {clientes.filter(c => c.estado === 'inactivo').length}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Bloqueados:</span>
+                      <span className="font-medium text-red-600">
+                        {clientes.filter(c => c.estado === 'bloqueado').length}
+                      </span>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
               {/* Opciones de exportación */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Download className="h-5 w-5" />
-                    Opciones de Exportación
-                  </CardTitle>
+                  <CardTitle className="text-lg">Exportar</CardTitle>
+                  <CardDescription>
+                    Descarga tu base de clientes en diferentes formatos
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <Button 
                       onClick={handleExportCSV}
                       disabled={isExporting || clientes.length === 0}
-                      className="w-full justify-start"
                       variant="outline"
+                      className="w-full justify-start"
                     >
                       {isExporting ? (
                         <>
@@ -404,8 +405,8 @@ export function ImportExportDialog({
                     <Button 
                       onClick={handleExportExcel}
                       disabled={isExporting || clientes.length === 0}
-                      className="w-full justify-start bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
                       variant="outline"
+                      className="w-full justify-start"
                     >
                       {isExporting ? (
                         <>

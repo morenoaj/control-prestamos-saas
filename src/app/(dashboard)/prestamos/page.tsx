@@ -645,7 +645,7 @@ export default function PrestamosPage() {
                                 Próximo pago:
                               </span>
                               <span className="font-bold text-blue-900">
-                                {formatCurrency(prestamo.montoProximoPago)}
+                                {formatCurrency(prestamo.montoProximoPago ?? 0)}
                               </span>
                             </div>
                             <div className="text-xs text-blue-600 mt-1">
@@ -697,7 +697,6 @@ export default function PrestamosPage() {
 
       {/* Detalle del Préstamo */}
       <Dialog open={!!prestamoDetalle} onOpenChange={() => setPrestamoDetalle(null)}>
-codex/add-functionality-for-loan-actions-la0yct
         <DialogContent className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
@@ -723,8 +722,10 @@ codex/add-functionality-for-loan-actions-la0yct
           saldoCapital: prestamoParaPago.saldoCapital,
           interesesPendientes: prestamoParaPago.interesesPendientes,
           moraAcumulada: prestamoParaPago.moraAcumulada,
-          montoProximoPago: prestamoParaPago.montoProximoPago,
-          fechaProximoPago: prestamoParaPago.fechaProximoPago,
+          montoProximoPago: prestamoParaPago.montoProximoPago ?? 0,
+          fechaProximoPago: prestamoParaPago.fechaProximoPago
+            ? convertirFecha(prestamoParaPago.fechaProximoPago)
+            : undefined,
           estado: prestamoParaPago.estado
         }] : []}
         onPagoRegistrado={handlePagoRegistrado}

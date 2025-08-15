@@ -1,4 +1,4 @@
-// src/hooks/useClienteImportExport.ts - CON SOPORTE EXCEL
+// src/hooks/useClienteImportExport.ts - COMPLETO Y CORREGIDO
 'use client'
 
 import { useState } from 'react'
@@ -155,7 +155,7 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
         { wch: 15 }, // Ingresos
         { wch: 10 }, // Credit Score
         { wch: 10 }, // Estado
-        { wch: 12 }, // Fecha Registro
+        { wch: 15 }, // Fecha Registro
         { wch: 15 }, // Ref 1 - Nombre
         { wch: 15 }, // Ref 1 - Teléfono
         { wch: 12 }, // Ref 1 - Relación
@@ -167,6 +167,7 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
         { wch: 12 }, // Ref 3 - Relación
         { wch: 30 }  // Observaciones
       ]
+
       ws['!cols'] = colWidths
 
       // Agregar hoja al libro
@@ -189,36 +190,35 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
     }
   }
 
-  // 📥 IMPORTAR CLIENTES (CSV Y EXCEL)
+  // 📥 IMPORTAR CLIENTES
   const importarClientes = async (
     archivo: File, 
     onClientesImportados: (clientes: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'>[]) => void
   ) => {
     setIsImporting(true)
-
+    
     try {
-      const extension = archivo.name.toLowerCase()
       let clientesImportados: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'>[] = []
-
-      if (extension.endsWith('.csv')) {
+      
+      if (archivo.name.toLowerCase().endsWith('.csv')) {
         clientesImportados = await importarDesdeCSV(archivo)
-      } else if (extension.endsWith('.xlsx') || extension.endsWith('.xls')) {
+      } else if (archivo.name.toLowerCase().endsWith('.xlsx') || archivo.name.toLowerCase().endsWith('.xls')) {
         clientesImportados = await importarDesdeExcel(archivo)
       } else {
-        throw new Error('Formato de archivo no soportado. Use CSV o Excel (.xlsx)')
+        throw new Error('Formato de archivo no compatible')
       }
 
       if (clientesImportados.length === 0) {
-        throw new Error('No se pudieron importar clientes válidos')
+        throw new Error('No se encontraron clientes válidos en el archivo')
       }
 
+      console.log('✅ Clientes importados:', clientesImportados.length)
       onClientesImportados(clientesImportados)
 
       toast({
         title: "Importación exitosa",
-        description: `Se importaron ${clientesImportados.length} clientes correctamente`,
+        description: `Se importaron ${clientesImportados.length} clientes`,
       })
-
     } catch (error: any) {
       console.error('Error importando clientes:', error)
       toast({
@@ -233,127 +233,128 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
 
   // 📊 IMPORTAR DESDE EXCEL
   const importarDesdeExcel = async (archivo: File): Promise<Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'>[]> => {
-    const XLSX = await import('xlsx')
-    
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      
-      reader.onload = (e) => {
-        try {
-          const data = e.target?.result
-          const workbook = XLSX.read(data, { type: 'binary' })
-          const sheetName = workbook.SheetNames[0]
-          const worksheet = workbook.Sheets[sheetName]
-          
-          // Convertir a JSON
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 })
-          
-          if (jsonData.length < 2) {
-            throw new Error('El archivo debe tener al menos una fila de datos')
-          }
-
-          const headers = jsonData[0] as string[]
-          const clientesImportados: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'>[] = []
-          const errores: string[] = []
-
-          // Procesar cada fila
-          for (let i = 1; i < jsonData.length; i++) {
-            try {
-              const fila = jsonData[i] as any[]
-              
-              if (!fila || fila.length < 10) {
-                errores.push(`Fila ${i + 1}: Faltan datos obligatorios`)
-                continue
-              }
-
-              // Extraer datos básicos
-              const nombre = fila[1]?.toString().trim()
-              const apellido = fila[2]?.toString().trim()
-              const cedula = fila[3]?.toString().trim()
-              const telefono = fila[4]?.toString().trim()
-
-              if (!nombre || !apellido || !cedula || !telefono) {
-                errores.push(`Fila ${i + 1}: Faltan datos obligatorios (nombre, apellido, cédula, teléfono)`)
-                continue
-              }
-
-              // Construir referencias
-              const referencias = []
-              
-              // Ref 1
-              if (fila[14] && fila[15] && fila[16]) {
-                referencias.push({
-                  nombre: fila[14].toString().trim(),
-                  telefono: fila[15].toString().trim(),
-                  relacion: fila[16].toString().trim()
-                })
-              }
-              
-              // Ref 2
-              if (fila[17] && fila[18] && fila[19]) {
-                referencias.push({
-                  nombre: fila[17].toString().trim(),
-                  telefono: fila[18].toString().trim(),
-                  relacion: fila[19].toString().trim()
-                })
-              }
-              
-              // Ref 3
-              if (fila[20] && fila[21] && fila[22]) {
-                referencias.push({
-                  nombre: fila[20].toString().trim(),
-                  telefono: fila[21].toString().trim(),
-                  relacion: fila[22].toString().trim()
-                })
-              }
-
-              // Si no hay referencias, agregar una por defecto
-              if (referencias.length === 0) {
-                referencias.push({
-                  nombre: 'Referencia pendiente',
-                  telefono: '000-0000',
-                  relacion: 'Familiar'
-                })
-              }
-
-              const cliente: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'> = {
-                codigo: fila[0]?.toString() || `CLI${Date.now()}${Math.random().toString(36).substr(2, 4)}`,
-                nombre: nombre,
-                apellido: apellido,
-                cedula: cedula,
-                telefono: telefono,
-                telefonoSecundario: fila[5]?.toString().trim() || undefined,
-                email: fila[6]?.toString().trim() || undefined,
-                direccion: fila[7]?.toString().trim() || 'Dirección por completar',
-                estadoCivil: fila[8]?.toString() || 'Soltero',
-                ocupacion: fila[9]?.toString().trim() || 'Por definir',
-                ingresosMensuales: parseFloat(fila[10]?.toString()) || 0,
-                creditScore: parseInt(fila[11]?.toString()) || 50,
-                estado: (fila[12]?.toString() as 'activo' | 'inactivo' | 'bloqueado') || 'activo',
-                referencias: referencias,
-                observaciones: fila[23]?.toString().trim() || undefined,
-                foto: undefined,
-                documentos: []
-              }
-
-              clientesImportados.push(cliente)
-            } catch (error) {
-              errores.push(`Fila ${i + 1}: Error procesando datos - ${error}`)
+    return new Promise(async (resolve, reject) => {
+      try {
+        // Importar XLSX dinámicamente
+        const XLSX = await import('xlsx')
+        
+        const reader = new FileReader()
+        
+        reader.onload = (e) => {
+          try {
+            const data = new Uint8Array(e.target?.result as ArrayBuffer)
+            const workbook = XLSX.read(data, { type: 'array' })
+            
+            // Tomar la primera hoja
+            const firstSheetName = workbook.SheetNames[0]
+            const worksheet = workbook.Sheets[firstSheetName]
+            
+            // Convertir a JSON
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 })
+            
+            if (jsonData.length < 2) {
+              throw new Error('El archivo debe tener al menos una fila de datos')
             }
-          }
 
-          if (errores.length > 0) {
-            console.warn('Errores de importación:', errores)
-          }
+            const clientesImportados: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'>[] = []
+            const errores: string[] = []
 
-          resolve(clientesImportados)
-        } catch (error) {
-          reject(error)
+            // Procesar cada fila (empezar desde la fila 1, saltando headers)
+            for (let i = 1; i < jsonData.length; i++) {
+              try {
+                const fila = jsonData[i] as any[]
+                
+                // Extraer datos básicos
+                const nombre = fila[1]?.toString().trim()
+                const apellido = fila[2]?.toString().trim()
+                const cedula = fila[3]?.toString().trim()
+                const telefono = fila[4]?.toString().trim()
+
+                if (!nombre || !apellido || !cedula || !telefono) {
+                  errores.push(`Fila ${i + 1}: Faltan datos obligatorios (nombre, apellido, cédula, teléfono)`)
+                  continue
+                }
+
+                // Construir referencias
+                const referencias = []
+                
+                // Ref 1
+                if (fila[14] && fila[15] && fila[16]) {
+                  referencias.push({
+                    nombre: fila[14].toString().trim(),
+                    telefono: fila[15].toString().trim(),
+                    relacion: fila[16].toString().trim()
+                  })
+                }
+                
+                // Ref 2
+                if (fila[17] && fila[18] && fila[19]) {
+                  referencias.push({
+                    nombre: fila[17].toString().trim(),
+                    telefono: fila[18].toString().trim(),
+                    relacion: fila[19].toString().trim()
+                  })
+                }
+                
+                // Ref 3
+                if (fila[20] && fila[21] && fila[22]) {
+                  referencias.push({
+                    nombre: fila[20].toString().trim(),
+                    telefono: fila[21].toString().trim(),
+                    relacion: fila[22].toString().trim()
+                  })
+                }
+
+                // Si no hay referencias, agregar una por defecto
+                if (referencias.length === 0) {
+                  referencias.push({
+                    nombre: 'Referencia pendiente',
+                    telefono: '000-0000',
+                    relacion: 'Familiar'
+                  })
+                }
+
+                const cliente: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'> = {
+                  codigo: fila[0]?.toString() || `CLI${Date.now()}${Math.random().toString(36).substr(2, 4)}`,
+                  nombre: nombre,
+                  apellido: apellido,
+                  cedula: cedula,
+                  telefono: telefono,
+                  telefonoSecundario: fila[5]?.toString().trim() || undefined,
+                  email: fila[6]?.toString().trim() || undefined,
+                  direccion: fila[7]?.toString().trim() || 'Dirección por completar',
+                  estadoCivil: fila[8]?.toString() || 'Soltero',
+                  ocupacion: fila[9]?.toString().trim() || 'Por definir',
+                  ingresosMensuales: parseFloat(fila[10]?.toString()) || 0,
+                  creditScore: parseInt(fila[11]?.toString()) || 50,
+                  estado: (fila[12]?.toString() as 'activo' | 'inactivo' | 'bloqueado') || 'activo',
+                  referencias: referencias,
+                  observaciones: fila[23]?.toString().trim() || undefined,
+                  foto: undefined,
+                  documentos: []
+                }
+
+                clientesImportados.push(cliente)
+              } catch (error) {
+                errores.push(`Fila ${i + 1}: Error procesando datos - ${error}`)
+              }
+            }
+
+            if (errores.length > 0) {
+              console.warn('Errores de importación:', errores)
+            }
+
+            resolve(clientesImportados)
+          } catch (error) {
+            reject(error)
+          }
         }
-      }
 
-      reader.onerror = () => reject(new Error('Error leyendo el archivo'))
-      reader.readAsBinaryString(archivo)
+        reader.onerror = () => reject(new Error('Error leyendo el archivo'))
+        reader.readAsArrayBuffer(archivo)
+      } catch (error) {
+        reject(error)
+      }
     })
   }
 
@@ -368,6 +369,28 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
 
     const clientesImportados: Omit<Cliente, 'id' | 'empresaId' | 'fechaRegistro'>[] = []
     const errores: string[] = []
+
+    // Función auxiliar para parsear CSV respetando comillas
+    const parsearCSVRow = (row: string): string[] => {
+      const result: string[] = []
+      let currentField = ''
+      let inQuotes = false
+      
+      for (let i = 0; i < row.length; i++) {
+        const char = row[i]
+        
+        if (char === '"') {
+          inQuotes = !inQuotes
+        } else if (char === ',' && !inQuotes) {
+          result.push(currentField.trim())
+          currentField = ''
+        } else {
+          currentField += char
+        }
+      }
+      result.push(currentField.trim())
+      return result
+    }
 
     // Procesar cada fila
     for (let i = 1; i < lineas.length; i++) {
@@ -467,7 +490,7 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
 
     const ejemplos = [
       'CLI001,María,González,8-123-456,6000-1234,6000-5678,maria@email.com,"Calle 50, Casa 123",Casado,Comerciante,1500,75,activo,2024-01-15,"Juan Pérez|6000-9999|Hermano;Ana López|6000-8888|Amiga","Cliente confiable"',
-      'CLI002,Carlos,Rodríguez,8-789-012,6500-4321,,"carlos@email.com","Vía España, Edificio Torre",Soltero,Empleado,2000,80,activo,2024-01-16,"Pedro Martín|6200-7777|Jefe","Excelente historial crediticio"'
+      'CLI002,Carlos,Rodríguez,8-789-012,6500-4321,,carlos@email.com,"Vía España, Edificio Torre",Soltero,Empleado,2000,80,activo,2024-01-16,"Pedro Martín|6200-7777|Jefe","Excelente historial crediticio"'
     ]
 
     const csvContent = [
@@ -552,12 +575,14 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
 
     // Configurar ancho de columnas
     const colWidths = [
-      { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
-      { wch: 15 }, { wch: 25 }, { wch: 30 }, { wch: 12 }, { wch: 20 },
-      { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 15 },
-      { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 12 },
+      { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, 
+      { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 30 },
+      { wch: 12 }, { wch: 20 }, { wch: 15 }, { wch: 10 },
+      { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+      { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 12 },
       { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 30 }
     ]
+
     ws['!cols'] = colWidths
 
     // Agregar hoja al libro
@@ -568,7 +593,7 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
 
     toast({
       title: "Plantilla Excel descargada",
-      description: "Abre el archivo en Excel, completa los datos y vuelve a importarlo",
+      description: "Usa esta plantilla como ejemplo para importar tus clientes",
     })
   }
 
@@ -579,34 +604,4 @@ export function useClienteImportExport(): UseClienteImportExportReturn {
     importarClientes,
     descargarPlantilla
   }
-}
-
-// Función auxiliar para parsear filas CSV correctamente
-function parsearCSVRow(row: string): string[] {
-  const result: string[] = []
-  let current = ''
-  let inQuotes = false
-  let i = 0
-
-  while (i < row.length) {
-    const char = row[i]
-    
-    if (char === '"') {
-      if (inQuotes && row[i + 1] === '"') {
-        current += '"'
-        i += 2
-        continue
-      }
-      inQuotes = !inQuotes
-    } else if (char === ',' && !inQuotes) {
-      result.push(current)
-      current = ''
-    } else {
-      current += char
-    }
-    i++
-  }
-  
-  result.push(current)
-  return result
 }
