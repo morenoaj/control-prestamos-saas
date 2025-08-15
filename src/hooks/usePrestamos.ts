@@ -1,61 +1,96 @@
-// ✅ ARCHIVO: src/hooks/usePrestamos.ts - COMPLETO CORREGIDO
+// src/hooks/usePrestamos.ts - CÓDIGO COMPLETO
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
 import { 
   collection, 
-  doc, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
   query, 
   where, 
   orderBy, 
-  onSnapshot,
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
   serverTimestamp,
   Timestamp,
   getDoc
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import { Prestamo, Cliente } from '@/types/database'
-import { EstadoPrestamo } from '@/types/prestamos'
 import { useAuth } from '@/context/AuthContext'
-import { convertirFecha } from '@/lib/utils'
-import { toast } from '@/hooks/use-toast'
+import { Prestamo } from '@/types/database'
+import { TipoTasa, EstadoPrestamo } from '@/types/prestamos'
 
-interface UsePrestamosReturn {
-  prestamos: Prestamo[]
-  loading: boolean
-  error: string | null
-  crearPrestamo: (prestamoData: Omit<Prestamo, 'id' | 'empresaId' | 'numero' | 'fechaCreacion'>) => Promise<string>
-  actualizarPrestamo: (id: string, prestamoData: Partial<Prestamo>) => Promise<void>
-  eliminarPrestamo: (id: string) => Promise<void>
-  obtenerPrestamo: (id: string) => Prestamo | undefined
-  obtenerPrestamosPorCliente: (clienteId: string) => Prestamo[]
-  calcularIntereses: (prestamo: Prestamo) => number
-  calcularMontoCuota: (prestamo: Prestamo) => number
-  actualizarEstadoPrestamo: (id: string, nuevoEstado: Prestamo['estado']) => Promise<void>
-  recargarPrestamos: () => Promise<void>
+// Interfaz extendida para incluir fecha de creación personalizada
+interface PrestamoConFechaPersonalizada extends Omit<Prestamo, 'id' | 'empresaId' | 'numero' | 'fechaCreacion'> {
+  fechaCreacion?: Date
 }
 
-// ✅ NUEVA FUNCIÓN: Calcular próxima fecha quincenal (15 o 30)
-const calcularProximaFechaQuincenal = (fechaBase: Date): Date => {
+// Función para limpiar datos antes de enviar a Firebase
+const limpiarDatosParaFirebase = (data: any) => {
+  const cleaned = { ...data }
+  
+  // Convertir fechas a Timestamp si es necesario
+  if (cleaned.fechaInicio && cleaned.fechaInicio instanceof Date) {
+    cleaned.fechaInicio = Timestamp.fromDate(cleaned.fechaInicio)
+  }
+  if (cleaned.fechaVencimiento && cleaned.fechaVencimiento instanceof Date) {
+    cleaned.fechaVencimiento = Timestamp.fromDate(cleaned.fechaVencimiento)
+  }
+  if (cleaned.fechaProximoPago && cleaned.fechaProximoPago instanceof Date) {
+    cleaned.fechaProximoPago = Timestamp.fromDate(cleaned.fechaProximoPago)
+  }
+  if (cleaned.ultimaActualizacionIntereses && cleaned.ultimaActualizacionIntereses instanceof Date) {
+    cleaned.ultimaActualizacionIntereses = Timestamp.fromDate(cleaned.ultimaActualizacionIntereses)
+  }
+  // Manejar fecha de creación personalizada
+  if (cleaned.fechaCreacion && cleaned.fechaCreacion instanceof Date) {
+    cleaned.fechaCreacion = Timestamp.fromDate(cleaned.fechaCreacion)
+  }
+  
+  // Eliminar campos undefined
+  Object.keys(cleaned).forEach(key => {
+    if (cleaned[key] === undefined) {
+      delete cleaned[key]
+    }
+  })
+  
+  return cleaned
+}
+
+// Generar número único de préstamo
+const generarNumeroPrestamo = async (empresaId: string): Promise<string> => {
+  const fecha = new Date()
+  const año = fecha.getFullYear().toString().slice(-2)
+  const mes = (fecha.getMonth() + 1).toString().padStart(2, '0')
+  const dia = fecha.getDate().toString().padStart(2, '0')
+  
+  // Contar préstamos del día para generar secuencial
+  const prestamosRef = collection(db, 'prestamos')
+  const q = query(
+    prestamosRef, 
+    where('empresaId', '==', empresaId),
+    where('fechaCreacion', '>=', Timestamp.fromDate(new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate()))),
+    where('fechaCreacion', '<', Timestamp.fromDate(new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate() + 1)))
+  )
+  
+  return new Promise((resolve) => {
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const count = snapshot.size + 1
+      const numero = `PR${año}${mes}${dia}${count.toString().padStart(3, '0')}`
+      unsubscribe()
+      resolve(numero)
+    })
+  })
+}
+
+// Calcular próxima fecha quincenal (15 y 30)
+export const calcularProximaFechaQuincenal = (fechaBase: Date): Date => {
   const fecha = new Date(fechaBase)
   const dia = fecha.getDate()
   
-  if (dia < 15) {
+  if (dia <= 15) {
     fecha.setDate(15)
-  } else if (dia === 15) {
-    fecha.setDate(30)
-    if (fecha.getDate() !== 30) {
-      fecha.setDate(0) // Último día del mes para febrero
-    }
-  } else if (dia < 30) {
-    fecha.setDate(30)
-    if (fecha.getDate() !== 30) {
-      fecha.setDate(0) // Último día del mes
-    }
   } else {
     fecha.setMonth(fecha.getMonth() + 1, 15)
   }
@@ -63,149 +98,66 @@ const calcularProximaFechaQuincenal = (fechaBase: Date): Date => {
   return fecha
 }
 
-// Función para limpiar datos antes de enviar a Firebase
-const limpiarDatosParaFirebase = (data: any): any => {
-  const cleaned: any = {}
-  
-  for (const [key, value] of Object.entries(data)) {
-    if (value !== undefined && value !== null && value !== '') {
-      if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof Timestamp)) {
-        // Procesar objetos anidados recursivamente
-        const cleanedNested = limpiarDatosParaFirebase(value)
-        if (Object.keys(cleanedNested).length > 0) {
-          cleaned[key] = cleanedNested
-        }
-      } else {
-        cleaned[key] = value
-      }
-    }
-  }
-  
-  return cleaned
-}
-
-// Función para generar número único de préstamo
-const generarNumeroPrestamo = async (empresaId: string): Promise<string> => {
-  const year = new Date().getFullYear()
-  const timestamp = Date.now().toString().slice(-6)
-  return `PR${year}${timestamp}`
-}
-
-// ✅ FUNCIÓN DE CÁLCULO DE INTERESES SIMPLE
+// Funciones de cálculo existentes
 export const calcularInteresesSimples = (
-  capital: number,
-  tasaAnual: number,
-  periodos: number,
-  tipoPeriodo: 'quincenal' | 'mensual' | 'anual' | 'indefinido' = 'mensual'
+  capital: number, 
+  tasa: number, 
+  plazo: number, 
+  tipoTasa: TipoTasa
 ): number => {
-  if (!capital || !tasaAnual || capital <= 0 || tasaAnual <= 0) {
-    return 0
-  }
-
-  // Para préstamos indefinidos, no calcular intereses totales
-  if (tipoPeriodo === 'indefinido' || !periodos || periodos <= 0) {
-    return 0
-  }
+  if (!capital || !tasa || !plazo) return 0
   
-  let tasaPorPeriodo: number
+  let tasaDecimal = tasa / 100
   
-  switch (tipoPeriodo) {
+  switch (tipoTasa) {
     case 'quincenal':
-      tasaPorPeriodo = tasaAnual / 24 // 24 quincenas al año
-      break
+      return capital * tasaDecimal * plazo
     case 'mensual':
-      tasaPorPeriodo = tasaAnual / 12
-      break
+      return capital * tasaDecimal * plazo
     case 'anual':
-      tasaPorPeriodo = tasaAnual
-      break
+      return capital * tasaDecimal * plazo
     default:
-      tasaPorPeriodo = tasaAnual / 12
+      return 0
   }
-  
-  return (capital * tasaPorPeriodo * periodos) / 100
 }
 
-// ✅ FUNCIÓN DE CÁLCULO DE CUOTA FIJA
 export const calcularMontoCuotaFija = (
-  capital: number,
-  tasaAnual: number,
-  periodos: number,
-  tipoPeriodo: 'quincenal' | 'mensual' | 'anual' | 'indefinido' = 'mensual'
+  capital: number, 
+  tasa: number, 
+  plazo: number, 
+  tipoTasa: TipoTasa
 ): number => {
-  // ✅ Validación de entrada
-  if (!capital || !tasaAnual || capital <= 0 || tasaAnual <= 0) {
-    return 0
-  }
-
-  // ✅ Para préstamos indefinidos, solo calcular intereses quincenales
-  if (tipoPeriodo === 'indefinido' || !periodos || periodos <= 0) {
-    return capital * (tasaAnual / 100) // Intereses simples por quincena
-  }
+  if (!capital || !tasa || !plazo) return 0
   
-  let tasaPorPeriodo: number
-  
-  switch (tipoPeriodo) {
-    case 'quincenal':
-      tasaPorPeriodo = tasaAnual / 24 / 100
-      break
-    case 'mensual':
-      tasaPorPeriodo = tasaAnual / 12 / 100
-      break
-    case 'anual':
-      tasaPorPeriodo = tasaAnual / 100
-      break
-    default:
-      tasaPorPeriodo = tasaAnual / 12 / 100
-  }
-  
-  if (tasaPorPeriodo === 0) {
-    return capital / periodos
-  }
-  
-  const factor = Math.pow(1 + tasaPorPeriodo, periodos)
-  return capital * (tasaPorPeriodo * factor) / (factor - 1)
+  const intereses = calcularInteresesSimples(capital, tasa, plazo, tipoTasa)
+  return (capital + intereses) / plazo
 }
 
-// ✅ FUNCIÓN PARA CALCULAR DÍAS DE ATRASO
-export const calcularDiasAtraso = (fechaVencimiento: Date | any): number => {
+export const calcularDiasAtraso = (fechaVencimiento: Date): number => {
   const hoy = new Date()
-  const vencimiento = convertirFecha(fechaVencimiento)
-  const diferencia = hoy.getTime() - vencimiento.getTime()
-  const dias = Math.ceil(diferencia / (1000 * 60 * 60 * 24))
-  return Math.max(0, dias)
+  const diffTime = hoy.getTime() - fechaVencimiento.getTime()
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+  return Math.max(0, diffDays)
 }
 
-// ✅ FUNCIÓN PARA DETERMINAR ESTADO DEL PRÉSTAMO
-export const determinarEstadoPrestamo = (prestamo: Prestamo): Prestamo['estado'] => {
-  const hoy = new Date()
-  
-  if (prestamo.saldoCapital <= 0) {
-    return 'finalizado'
-  }
-
-  // ✅ Para préstamos indefinidos, no usar fecha de vencimiento
-  if (prestamo.esPlazoIndefinido || prestamo.tipoTasa === 'indefinido') {
-    return prestamo.estado // Mantener estado actual
-  }
-
-  if (prestamo.fechaVencimiento) {
-    const fechaVencimiento = convertirFecha(prestamo.fechaVencimiento)
-    if (hoy > fechaVencimiento) {
-      return 'atrasado'
-    }
-  }
-  
-  return prestamo.estado
+export const determinarEstadoPrestamo = (
+  saldoCapital: number,
+  fechaProximoPago?: Date,
+  diasAtraso: number = 0  // ✅ Debe ser número, no objeto Prestamo
+): EstadoPrestamo => {
+  if (saldoCapital <= 0) return 'finalizado'
+  if (diasAtraso > 30) return 'atrasado'
+  if (fechaProximoPago && calcularDiasAtraso(fechaProximoPago) > 0) return 'atrasado'
+  return 'activo'
 }
 
-export function usePrestamos(): UsePrestamosReturn {
+export const usePrestamos = () => {
   const { empresaActual, user } = useAuth()
   const [prestamos, setPrestamos] = useState<Prestamo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Obtener referencia de la colección
+  // Obtener referencia de colección
   const getPrestamosCollection = useCallback(() => {
     if (!empresaActual?.id) return null
     return collection(db, 'prestamos')
@@ -220,66 +172,41 @@ export function usePrestamos(): UsePrestamosReturn {
     }
 
     const prestamosRef = getPrestamosCollection()
-    if (!prestamosRef) return
-
-    setLoading(true)
-    setError(null)
+    if (!prestamosRef) {
+      setLoading(false)
+      return
+    }
 
     const q = query(
       prestamosRef,
       where('empresaId', '==', empresaActual.id),
-      orderBy('fechaInicio', 'desc')
+      orderBy('fechaCreacion', 'desc')
     )
-
-    console.log('💰 Configurando listener para préstamos de empresa:', empresaActual.id)
 
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const prestamosData: Prestamo[] = []
-        snapshot.forEach((doc) => {
-          try {
-            const data = doc.data()
-            
-            prestamosData.push({
-              id: doc.id,
-              ...data,
-              fechaInicio: data.fechaInicio as Timestamp,
-              fechaVencimiento: data.fechaVencimiento as Timestamp,
-              fechaProximoPago: data.fechaProximoPago as Timestamp,
-            } as Prestamo)
-          } catch (error) {
-            console.error('Error procesando préstamo:', doc.id, error)
-          }
-        })
+        const prestamosData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as Prestamo[]
         
-        console.log('✅ Préstamos cargados:', prestamosData.length)
         setPrestamos(prestamosData)
         setLoading(false)
         setError(null)
       },
-      (err) => {
-        console.error('❌ Error cargando préstamos:', err)
+      (error) => {
+        console.error('Error obteniendo préstamos:', error)
         setError('Error al cargar los préstamos')
         setLoading(false)
-        toast({
-          title: "Error",
-          description: "No se pudieron cargar los préstamos",
-          variant: "destructive"
-        })
       }
     )
 
-    return () => {
-      console.log('🔄 Limpiando listener de préstamos')
-      unsubscribe()
-    }
+    return () => unsubscribe()
   }, [empresaActual?.id, getPrestamosCollection])
 
-  // ✅ CREAR PRÉSTAMO CORREGIDO
-  const crearPrestamo = useCallback(async (
-    prestamoData: Omit<Prestamo, 'id' | 'empresaId' | 'numero' | 'fechaCreacion'>
-  ): Promise<string> => {
+  // Crear préstamo con fecha personalizada
+  const crearPrestamo = useCallback(async (prestamoData: PrestamoConFechaPersonalizada): Promise<string> => {
     if (!empresaActual?.id || !user?.uid) {
       throw new Error('No hay empresa o usuario seleccionado')
     }
@@ -298,10 +225,13 @@ export function usePrestamos(): UsePrestamosReturn {
         throw new Error('El cliente seleccionado no existe')
       }
 
-      // Generar número único
+      // Usar fecha personalizada o actual
+      const fechaCreacionFinal = prestamoData.fechaCreacion || new Date()
+      
+      // Generar número único basado en la fecha de creación
       const numero = await generarNumeroPrestamo(empresaActual.id)
 
-      // ✅ REFORZAR DETECCIÓN DE PRÉSTAMOS INDEFINIDOS
+      // Detectar tipo de préstamo
       const esPrestamoIndefinido = prestamoData.esPlazoIndefinido || 
                                   prestamoData.tipoTasa === 'indefinido' || 
                                   !prestamoData.plazo || 
@@ -311,25 +241,25 @@ export function usePrestamos(): UsePrestamosReturn {
         esIndefinido: esPrestamoIndefinido,
         plazo: prestamoData.plazo,
         tipoTasa: prestamoData.tipoTasa,
-        esPlazoIndefinido: prestamoData.esPlazoIndefinido
+        fechaCreacion: fechaCreacionFinal.toLocaleDateString('es-PA')
       })
 
-      // Calcular fechas
-      const fechaInicio = new Date()
+      // Calcular fechas basadas en la fecha de creación personalizada
+      const fechaInicio = fechaCreacionFinal
       let fechaVencimiento: Date | null = null
       let fechaProximoPago: Date
       let interesesTotales = 0
       let montoCuota = 0
 
       if (esPrestamoIndefinido) {
-        // ✅ PRÉSTAMOS INDEFINIDOS: Solo próxima fecha quincenal, SIN fecha de vencimiento
+        // Préstamos indefinidos: próxima fecha quincenal basada en fecha de creación
         fechaProximoPago = calcularProximaFechaQuincenal(fechaInicio)
         montoCuota = prestamoData.monto * (prestamoData.tasaInteres / 100)
-        fechaVencimiento = null // ✅ EXPLÍCITAMENTE null
+        fechaVencimiento = null
         
         console.log('📅 Préstamo indefinido - Próximo pago:', fechaProximoPago.toLocaleDateString())
       } else {
-        // ✅ PRÉSTAMOS CON PLAZO FIJO
+        // Préstamos con plazo fijo basados en fecha de creación
         fechaVencimiento = new Date(fechaInicio)
         fechaProximoPago = new Date(fechaInicio)
         
@@ -366,18 +296,16 @@ export function usePrestamos(): UsePrestamosReturn {
         console.log('📅 Préstamo con plazo - Vencimiento:', fechaVencimiento?.toLocaleDateString())
       }
 
-      // ✅ CONSTRUIR OBJETO PRÉSTAMO FINAL
+      // Construir objeto préstamo final
       const nuevoPrestamo = {
         ...prestamoData,
         empresaId: empresaActual.id,
         numero,
         usuarioCreador: user.uid,
         fechaInicio: fechaInicio,
-        // ✅ SOLO incluir fechaVencimiento si NO es indefinido
+        fechaCreacion: fechaCreacionFinal, // Incluir fecha de creación personalizada
         ...(fechaVencimiento && !esPrestamoIndefinido && { fechaVencimiento }),
-        // ✅ FORZAR plazo a undefined para préstamos indefinidos
         plazo: esPrestamoIndefinido ? undefined : prestamoData.plazo,
-        // ✅ MARCAR EXPLÍCITAMENTE como indefinido
         esPlazoIndefinido: esPrestamoIndefinido,
         saldoCapital: prestamoData.monto,
         interesesPendientes: interesesTotales,
@@ -387,7 +315,6 @@ export function usePrestamos(): UsePrestamosReturn {
         fechaProximoPago: fechaProximoPago,
         montoProximoPago: isNaN(montoCuota) || montoCuota <= 0 ? 
           prestamoData.monto * (prestamoData.tasaInteres / 100) : montoCuota,
-        fechaCreacion: fechaInicio,
         estado: 'activo' as EstadoPrestamo,
         ...(esPrestamoIndefinido && { ultimaActualizacionIntereses: fechaInicio })
       }
@@ -395,44 +322,31 @@ export function usePrestamos(): UsePrestamosReturn {
       console.log('💾 Guardando préstamo:', {
         numero: nuevoPrestamo.numero,
         esIndefinido: esPrestamoIndefinido,
-        tieneFechaVencimiento: !!nuevoPrestamo.fechaVencimiento,
-        tipoTasa: nuevoPrestamo.tipoTasa,
-        plazoFinal: nuevoPrestamo.plazo
+        fechaCreacion: fechaCreacionFinal.toLocaleDateString('es-PA'),
+        tieneFechaVencimiento: !esPrestamoIndefinido
       })
 
-      // Limpiar datos antes de guardar
-      const datosBD = limpiarDatosParaFirebase(nuevoPrestamo)
-      const docRef = await addDoc(collection(db, 'prestamos'), datosBD)
+      // Limpiar datos y guardar
+      const datosLimpios = limpiarDatosParaFirebase(nuevoPrestamo)
+      const docRef = await addDoc(prestamosRef, datosLimpios)
       
-      toast({
-        title: "Préstamo creado",
-        description: `Préstamo ${nuevoPrestamo.numero} creado exitosamente`,
-      })
-
+      console.log('✅ Préstamo creado con ID:', docRef.id)
       return docRef.id
     } catch (error: any) {
-      console.error('❌ Error al crear préstamo:', error)
-      toast({
-        title: "Error",
-        description: error.message || 'Error al crear el préstamo',
-        variant: "destructive"
-      })
-      throw error
+      console.error('❌ Error creando préstamo:', error)
+      throw new Error(error.message || 'Error al crear el préstamo')
     }
   }, [empresaActual?.id, user?.uid, getPrestamosCollection])
 
-  const actualizarPrestamo = useCallback(async (
-    id: string, 
-    prestamoData: Partial<Prestamo>
-  ): Promise<void> => {
+  // Actualizar préstamo
+  const actualizarPrestamo = useCallback(async (id: string, datosActualizacion: Partial<Prestamo>): Promise<void> => {
     if (!empresaActual?.id) {
       throw new Error('No hay empresa seleccionada')
     }
 
     try {
-      console.log('🔄 Actualizando préstamo:', id, prestamoData)
       const prestamoRef = doc(db, 'prestamos', id)
-      const datosLimpios = limpiarDatosParaFirebase(prestamoData)
+      const datosLimpios = limpiarDatosParaFirebase(datosActualizacion)
       await updateDoc(prestamoRef, datosLimpios)
       console.log('✅ Préstamo actualizado:', id)
     } catch (error: any) {
@@ -441,13 +355,13 @@ export function usePrestamos(): UsePrestamosReturn {
     }
   }, [empresaActual?.id])
 
+  // Eliminar préstamo
   const eliminarPrestamo = useCallback(async (id: string): Promise<void> => {
     if (!empresaActual?.id) {
       throw new Error('No hay empresa seleccionada')
     }
 
     try {
-      console.log('🗑️ Eliminando préstamo:', id)
       const prestamoRef = doc(db, 'prestamos', id)
       await deleteDoc(prestamoRef)
       console.log('✅ Préstamo eliminado:', id)
@@ -457,6 +371,7 @@ export function usePrestamos(): UsePrestamosReturn {
     }
   }, [empresaActual?.id])
 
+  // Funciones adicionales requeridas por la página
   const obtenerPrestamo = useCallback((id: string): Prestamo | undefined => {
     return prestamos.find(prestamo => prestamo.id === id)
   }, [prestamos])
@@ -466,74 +381,46 @@ export function usePrestamos(): UsePrestamosReturn {
   }, [prestamos])
 
   const calcularIntereses = useCallback((prestamo: Prestamo): number => {
-    return calcularInteresesSimples(
-      prestamo.monto,
-      prestamo.tasaInteres,
-      prestamo.plazo || 1,
-      prestamo.tipoTasa
-    )
+    if (!prestamo.ultimaActualizacionIntereses) return 0
+    
+    const fechaUltimaActualizacion = prestamo.ultimaActualizacionIntereses.toDate()
+    const fechaActual = new Date()
+    const diasTranscurridos = Math.floor((fechaActual.getTime() - fechaUltimaActualizacion.getTime()) / (1000 * 60 * 60 * 24))
+    
+    return (prestamo.saldoCapital * (prestamo.tasaInteres / 100) * diasTranscurridos) / 15
   }, [])
 
   const calcularMontoCuota = useCallback((prestamo: Prestamo): number => {
+    if (!prestamo.plazo || prestamo.esPlazoIndefinido) {
+      // Para préstamos indefinidos, retornar intereses por quincena
+      return prestamo.monto * (prestamo.tasaInteres / 100)
+    }
+    
     return calcularMontoCuotaFija(
       prestamo.monto,
       prestamo.tasaInteres,
-      prestamo.plazo || 1,
+      prestamo.plazo,
       prestamo.tipoTasa
     )
   }, [])
 
   const actualizarEstadoPrestamo = useCallback(async (
     id: string, 
-    nuevoEstado: Prestamo['estado']
+    nuevoEstado: EstadoPrestamo
   ): Promise<void> => {
     await actualizarPrestamo(id, { estado: nuevoEstado })
   }, [actualizarPrestamo])
 
   const recargarPrestamos = useCallback(async (): Promise<void> => {
-    if (!empresaActual?.id) return
-
-    const prestamosRef = getPrestamosCollection()
-    if (!prestamosRef) return
-
-    try {
-      setLoading(true)
-      setError(null)
-
-      const q = query(
-        prestamosRef,
-        where('empresaId', '==', empresaActual.id),
-        orderBy('fechaInicio', 'desc')
-      )
-
-      const snapshot = await getDocs(q)
-      const prestamosData: Prestamo[] = []
-      
-      snapshot.forEach((doc) => {
-        const data = doc.data()
-        prestamosData.push({
-          id: doc.id,
-          ...data,
-          fechaInicio: data.fechaInicio as Timestamp,
-          fechaVencimiento: data.fechaVencimiento as Timestamp,
-          fechaProximoPago: data.fechaProximoPago as Timestamp,
-        } as Prestamo)
-      })
-
-      setPrestamos(prestamosData)
-      console.log('🔄 Préstamos recargados:', prestamosData.length)
-    } catch (err: any) {
-      console.error('❌ Error recargando préstamos:', err)
-      setError('Error al recargar los préstamos')
-      toast({
-        title: "Error",
-        description: "No se pudieron recargar los préstamos",
-        variant: "destructive"
-      })
-    } finally {
-      setLoading(false)
+    if (!empresaActual?.id) {
+      console.warn('No hay empresa seleccionada para recargar préstamos')
+      return
     }
-  }, [empresaActual?.id, getPrestamosCollection])
+
+    // No necesitamos hacer nada especial aquí porque el useEffect
+    // ya maneja la carga en tiempo real con onSnapshot
+    console.log('🔄 Recargando préstamos (manejado por onSnapshot)')
+  }, [empresaActual?.id])
 
   return {
     prestamos,
@@ -547,6 +434,11 @@ export function usePrestamos(): UsePrestamosReturn {
     calcularIntereses,
     calcularMontoCuota,
     actualizarEstadoPrestamo,
-    recargarPrestamos
+    recargarPrestamos,
+    calcularProximaFechaQuincenal,
+    calcularInteresesSimples,
+    calcularMontoCuotaFija,
+    calcularDiasAtraso,
+    determinarEstadoPrestamo
   }
 }

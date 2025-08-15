@@ -1,17 +1,17 @@
-// ✅ ARCHIVO 4: src/types/prestamos.ts - CORREGIDO Y COMPLETO
+// src/types/prestamos.ts - CÓDIGO COMPLETO
 import { z } from 'zod';
 
-// ✅ DEFINIR TIPOS CONSTANTES PRIMERO (esto solucionará el error de TypeScript)
+// Definir tipos constantes primero
 export const TIPO_TASA_VALUES = ['quincenal', 'mensual', 'anual', 'indefinido'] as const;
 export type TipoTasa = typeof TIPO_TASA_VALUES[number];
 
 export const ESTADO_PRESTAMO_VALUES = ['pendiente', 'activo', 'finalizado', 'atrasado', 'cancelado'] as const;
 export type EstadoPrestamo = typeof ESTADO_PRESTAMO_VALUES[number];
 
-// ✅ SCHEMA ZOD CORREGIDO para el formulario
+// Schema base original
 export const prestamoSchema = z.object({
   clienteId: z.string().min(1, 'Debe seleccionar un cliente'),
-  monto: z.number().min(5, 'El monto mínimo es $5'), // ✅ $5 mínimo
+  monto: z.number().min(5, 'El monto mínimo es $5'),
   tasaInteres: z.number().min(0.1, 'La tasa debe ser mayor a 0.1%').max(100, 'La tasa no puede ser mayor a 100%'),
   tipoTasa: z.enum(TIPO_TASA_VALUES, {
     message: 'Selecciona un tipo de tasa válido'
@@ -36,10 +36,33 @@ export const prestamoSchema = z.object({
   }
 );
 
-// ✅ TIPO INFERIDO del schema
-export type PrestamoFormData = z.infer<typeof prestamoSchema>;
+// Schema extendido con fecha de creación personalizada
+export const prestamoSchemaExtendido = prestamoSchema.extend({
+  fechaCreacion: z.date().optional(),
+  usarFechaPersonalizada: z.boolean().optional()
+}).refine(
+  (data) => {
+    // Si se marca usar fecha personalizada, debe proporcionar la fecha
+    if (data.usarFechaPersonalizada && !data.fechaCreacion) {
+      return false;
+    }
+    // La fecha no puede ser futura
+    if (data.fechaCreacion && data.fechaCreacion > new Date()) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: "Debe proporcionar una fecha válida (no futura) cuando esté habilitada",
+    path: ["fechaCreacion"],
+  }
+);
 
-// ✅ INTERFACES PARA SISTEMA QUINCENAL
+// Tipos inferidos
+export type PrestamoFormData = z.infer<typeof prestamoSchema>;
+export type PrestamoFormDataExtendido = z.infer<typeof prestamoSchemaExtendido>;
+
+// Interfaces para sistema quincenal
 export interface PeriodoQuincenal {
   fecha: Date;
   montoIntereses: number;
@@ -58,7 +81,7 @@ export interface CalculoQuincenal {
   periodoActual: PeriodoQuincenal;
 }
 
-// ✅ INTERFACES PARA SISTEMA DIARIO (mantenidas por compatibilidad)
+// Interfaces para sistema diario (mantenidas por compatibilidad)
 export interface CalculoIntereses {
   interesesDiarios: number;
   interesesAcumulados: number;
@@ -72,10 +95,7 @@ export interface DistribucionPago {
   sobrante: number;
 }
 
-// ✅ FUNCIONES DE UTILIDAD MEJORADAS
-/**
- * Formatea un número como moneda USD, manejando casos de NaN y undefined
- */
+// Función de utilidad mejorada para formateo de moneda
 export const formatCurrency = (amount: number | undefined | null): string => {
   // Manejar casos de valores no válidos
   if (amount === undefined || amount === null || isNaN(amount)) {
@@ -83,13 +103,12 @@ export const formatCurrency = (amount: number | undefined | null): string => {
   }
   
   // Asegurar que es un número válido
-  const validAmount = typeof amount === 'number' ? amount : 0;
+  const validAmount = typeof amount === 'number' ? amount : parseFloat(String(amount));
   
   if (isNaN(validAmount)) {
     return '$0.00';
   }
   
-  // Formatear como moneda USD
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -98,164 +117,126 @@ export const formatCurrency = (amount: number | undefined | null): string => {
   }).format(validAmount);
 };
 
-/**
- * Calcula la próxima fecha de pago quincenal (15 o 30)
- */
-export const calcularProximaFechaQuincenal = (fechaActual: Date = new Date()): Date => {
-  const fecha = new Date(fechaActual);
+// Función para formatear fechas
+export const formatDate = (date: Date | string | null | undefined): string => {
+  if (!date) return 'No definida';
+  
+  try {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    
+    if (isNaN(dateObj.getTime())) {
+      return 'Fecha inválida';
+    }
+    
+    return dateObj.toLocaleDateString('es-PA', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  } catch (error) {
+    return 'Error en fecha';
+  }
+};
+
+// Función para convertir Timestamp a Date
+export const convertirFecha = (timestamp: any): Date => {
+  if (!timestamp) return new Date();
+  
+  // Si ya es un Date
+  if (timestamp instanceof Date) return timestamp;
+  
+  // Si es un Timestamp de Firebase
+  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
+    return timestamp.toDate();
+  }
+  
+  // Si es un string o número
+  try {
+    return new Date(timestamp);
+  } catch (error) {
+    return new Date();
+  }
+};
+
+// Función para validar rango de fechas
+export const validarRangoFechas = (fechaInicio: Date, fechaFin: Date): boolean => {
+  return fechaInicio <= fechaFin;
+};
+
+// Función para calcular días entre fechas
+export const calcularDiasEntreFechas = (fechaInicio: Date, fechaFin: Date): number => {
+  const diffTime = Math.abs(fechaFin.getTime() - fechaInicio.getTime());
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
+
+// Constantes útiles
+export const PERIODOS_QUINCENAL = {
+  PRIMER_PERIODO: 15,
+  SEGUNDO_PERIODO: 30,
+  DIAS_POR_QUINCENA: 15
+};
+
+export const LIMITES_SISTEMA = {
+  MONTO_MINIMO: 5,
+  MONTO_MAXIMO: 1000000,
+  TASA_MINIMA: 0.1,
+  TASA_MAXIMA: 100,
+  PLAZO_MINIMO: 1,
+  PLAZO_MAXIMO: 360
+};
+
+// Función para calcular próxima fecha quincenal
+export const calcularProximaFechaQuincenal = (fechaBase: Date): Date => {
+  const fecha = new Date(fechaBase);
   const dia = fecha.getDate();
   
-  if (dia < 15) {
-    // Si estamos antes del 15, el próximo pago es el 15
+  if (dia <= 15) {
     fecha.setDate(15);
-  } else if (dia === 15) {
-    // Si es exactamente el 15, el próximo pago es el 30
-    fecha.setDate(30);
-    // Ajustar para febrero (28 o 29 días)
-    if (fecha.getDate() !== 30) {
-      fecha.setDate(0); // Último día del mes
-    }
-  } else if (dia < 30) {
-    // Si estamos entre el 15 y el 30, el próximo pago es el 30
-    fecha.setDate(30);
-    // Ajustar para meses con menos de 30 días
-    if (fecha.getDate() !== 30) {
-      fecha.setDate(0); // Último día del mes
-    }
   } else {
-    // Si ya pasó el 30, el próximo pago es el 15 del siguiente mes
     fecha.setMonth(fecha.getMonth() + 1, 15);
   }
   
   return fecha;
 };
 
-/**
- * Genera todas las fechas de pago quincenales desde una fecha inicio hasta hoy
- */
-export const generarFechasQuincenales = (
-  fechaInicio: Date, 
-  fechaActual: Date = new Date()
-): Date[] => {
-  const fechas: Date[] = [];
-  let fecha = new Date(fechaInicio);
-  
-  // Ajustar la primera fecha al próximo 15 o 30
-  if (fecha.getDate() <= 15) {
-    fecha.setDate(15);
-  } else {
-    fecha.setDate(30);
-    if (fecha.getDate() !== 30) {
-      fecha.setDate(0); // Último día del mes
-    }
-  }
-  
-  while (fecha <= fechaActual) {
-    fechas.push(new Date(fecha));
-    
-    // Avanzar a la siguiente fecha quincenal
-    if (fecha.getDate() === 15) {
-      fecha.setDate(30);
-      if (fecha.getDate() !== 30) {
-        fecha.setDate(0); // Último día del mes
-      }
-    } else {
-      fecha.setMonth(fecha.getMonth() + 1, 15);
-    }
-  }
-  
-  return fechas;
-};
-
-/**
- * ✅ FUNCIÓN PRINCIPAL - Calcula todos los intereses quincenales (actuales y atrasados)
- */
+// Función para calcular intereses quincenales
 export const calcularInteresesQuincenales = (
-  prestamo: {
-    monto: number;
-    saldoCapital: number;
-    tasaInteres: number;
-    fechaInicio: Date;
-    esPlazoIndefinido?: boolean;
-  },
-  pagosRealizados: { fecha: Date; montoIntereses: number }[] = [],
+  capital: number,
+  tasaInteres: number,
+  fechaInicio: Date,
   fechaActual: Date = new Date()
 ): CalculoQuincenal => {
+  const fechaBase = new Date(fechaInicio);
+  const interesesPorQuincena = capital * (tasaInteres / 100);
   
-  if (!prestamo.esPlazoIndefinido) {
-    // Para préstamos con plazo fijo, devolver valores básicos
-    return {
-      interesesActuales: 0,
-      interesesAtrasados: 0,
-      totalInteresesPendientes: 0,
-      capitalPendiente: prestamo.saldoCapital || 0,
-      totalAPagar: 0,
-      proximaFechaPago: new Date(),
-      periodosVencidos: [],
-      periodoActual: {
-        fecha: new Date(),
-        montoIntereses: 0,
-        vencido: false,
-        diasVencido: 0
-      }
-    };
-  }
-
-  // Validar datos de entrada
-  const saldoCapital = prestamo.saldoCapital || 0;
-  const tasaInteres = prestamo.tasaInteres || 0;
-  
-  if (saldoCapital <= 0 || tasaInteres <= 0) {
-    return {
-      interesesActuales: 0,
-      interesesAtrasados: 0,
-      totalInteresesPendientes: 0,
-      capitalPendiente: saldoCapital,
-      totalAPagar: 0,
-      proximaFechaPago: calcularProximaFechaQuincenal(fechaActual),
-      periodosVencidos: [],
-      periodoActual: {
-        fecha: calcularProximaFechaQuincenal(fechaActual),
-        montoIntereses: 0,
-        vencido: false,
-        diasVencido: 0
-      }
-    };
-  }
-
-  // Generar todas las fechas de pago quincenales desde el inicio
-  const fechasPago = generarFechasQuincenales(prestamo.fechaInicio, fechaActual);
-  const interesesPorQuincena = saldoCapital * (tasaInteres / 100);
-  
-  // Crear períodos con información de vencimiento
+  // Calcular períodos vencidos
   const periodosVencidos: PeriodoQuincenal[] = [];
   let totalInteresesAtrasados = 0;
   
-  fechasPago.forEach(fechaPago => {
-    const diasVencido = Math.floor((fechaActual.getTime() - fechaPago.getTime()) / (1000 * 60 * 60 * 24));
+  let fechaIteracion = new Date(fechaBase);
+  while (fechaIteracion < fechaActual) {
+    const proximaFecha = calcularProximaFechaQuincenal(fechaIteracion);
     
-    // Verificar si este período fue pagado
-    const pagoEncontrado = pagosRealizados.find(pago => {
-      const diferenciaDias = Math.abs((pago.fecha.getTime() - fechaPago.getTime()) / (1000 * 60 * 60 * 24));
-      return diferenciaDias <= 7 && pago.montoIntereses >= interesesPorQuincena;
-    });
-    
-    if (!pagoEncontrado && diasVencido > 0) {
-      const periodo: PeriodoQuincenal = {
-        fecha: fechaPago,
+    if (proximaFecha <= fechaActual) {
+      const diasVencido = Math.floor((fechaActual.getTime() - proximaFecha.getTime()) / (1000 * 60 * 60 * 24));
+      
+      periodosVencidos.push({
+        fecha: proximaFecha,
         montoIntereses: interesesPorQuincena,
         vencido: true,
         diasVencido
-      };
-      periodosVencidos.push(periodo);
+      });
+      
       totalInteresesAtrasados += interesesPorQuincena;
     }
-  });
+    
+    fechaIteracion = proximaFecha;
+  }
   
-  // Calcular próxima fecha de pago
+  // Próxima fecha de pago
   const proximaFechaPago = calcularProximaFechaQuincenal(fechaActual);
   
-  // Período actual (próximo a vencer)
+  // Período actual
   const periodoActual: PeriodoQuincenal = {
     fecha: proximaFechaPago,
     montoIntereses: interesesPorQuincena,
@@ -263,24 +244,19 @@ export const calcularInteresesQuincenales = (
     diasVencido: 0
   };
   
-  // Intereses actuales (de la quincena presente)
-  const interesesActuales = interesesPorQuincena;
-  
   return {
-    interesesActuales: interesesActuales || 0,
-    interesesAtrasados: totalInteresesAtrasados || 0,
-    totalInteresesPendientes: (totalInteresesAtrasados + interesesActuales) || 0,
-    capitalPendiente: saldoCapital,
-    totalAPagar: (totalInteresesAtrasados + interesesActuales) || 0,
+    interesesActuales: interesesPorQuincena,
+    interesesAtrasados: totalInteresesAtrasados,
+    totalInteresesPendientes: totalInteresesAtrasados + interesesPorQuincena,
+    capitalPendiente: capital,
+    totalAPagar: totalInteresesAtrasados + interesesPorQuincena,
     proximaFechaPago,
     periodosVencidos,
     periodoActual
   };
 };
 
-/**
- * Formatea la información del próximo pago para mostrar en la UI
- */
+// Función para formatear información del próximo pago
 export const formatearProximoPago = (calculo: CalculoQuincenal): string => {
   const fecha = calculo.proximaFechaPago.toLocaleDateString('es-PA');
   const monto = formatCurrency(calculo.totalAPagar);
@@ -292,9 +268,7 @@ export const formatearProximoPago = (calculo: CalculoQuincenal): string => {
   return `${monto} - ${fecha} (Intereses quincenales)`;
 };
 
-/**
- * ✅ NUEVA FUNCIÓN: Validar si un préstamo es indefinido
- */
+// Función para validar si un préstamo es indefinido
 export const esPrestamoIndefinido = (prestamo: {
   esPlazoIndefinido?: boolean;
   tipoTasa?: string;
@@ -306,9 +280,7 @@ export const esPrestamoIndefinido = (prestamo: {
          prestamo.plazo <= 0;
 };
 
-/**
- * ✅ NUEVA FUNCIÓN: Calcular monto válido para próximo pago
- */
+// Función para calcular monto válido para próximo pago
 export const calcularMontoProximoPagoSeguro = (
   prestamo: {
     monto: number;
@@ -344,9 +316,26 @@ export const calcularMontoProximoPagoSeguro = (
   return isNaN(montoCalculado) ? 0 : montoCalculado;
 };
 
-/**
- * ✅ NUEVA FUNCIÓN: Validar datos de préstamo antes de guardar
- */
+// Tipos para reportes y estadísticas
+export interface EstadisticasPrestamo {
+  totalPrestamos: number;
+  montoTotalPrestado: number;
+  montoTotalPendiente: number;
+  promedioMontoPrestamo: number;
+  prestamosPorEstado: Record<EstadoPrestamo, number>;
+  prestamosPorTipoTasa: Record<TipoTasa, number>;
+}
+
+export interface ResumenMensual {
+  mes: number;
+  año: number;
+  prestamosCreados: number;
+  montoTotalCreado: number;
+  prestamosFinalizados: number;
+  montoTotalRecuperado: number;
+}
+
+// Función para validar datos de préstamo antes de guardar
 export const validarDatosPrestamo = (prestamo: any): { esValido: boolean; errores: string[] } => {
   const errores: string[] = [];
 
@@ -380,3 +369,21 @@ export const validarDatosPrestamo = (prestamo: any): { esValido: boolean; errore
     errores
   };
 };
+
+// Export default para facilitar importaciones
+export default {
+  formatCurrency,
+  formatDate,
+  convertirFecha,
+  validarRangoFechas,
+  calcularDiasEntreFechas,
+  calcularProximaFechaQuincenal,
+  calcularInteresesQuincenales,
+  formatearProximoPago,
+  esPrestamoIndefinido,
+  calcularMontoProximoPagoSeguro,
+  validarDatosPrestamo,
+  PERIODOS_QUINCENAL,
+  LIMITES_SISTEMA
+};
+

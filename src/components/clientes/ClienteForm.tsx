@@ -233,7 +233,8 @@ export function ClienteForm({ isOpen, onClose, cliente, onSave }: ClienteFormPro
         ...(data.observaciones && data.observaciones.trim() && {
           observaciones: data.observaciones.trim()
         }),
-        estado: cliente?.estado || 'activo'
+        estado: cliente?.estado || 'activo',
+        fechaActualizacion: (await import('firebase/firestore')).Timestamp.now()
       }
       
       console.log('✨ Datos preparados para enviar:', clienteData)
