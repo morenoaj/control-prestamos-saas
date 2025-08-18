@@ -366,7 +366,7 @@ export function ImportExportDialog({
                     <div className="flex justify-between text-sm">
                       <span>Bloqueados:</span>
                       <span className="font-medium text-red-600">
-                        {clientes.filter(c => c.estado === 'bloqueado').length}
+                        {clientes.filter(c => c.estado === 'suspendido').length}
                       </span>
                     </div>
                   </div>
