@@ -1,5 +1,4 @@
-// src/hooks/usePagos.ts - Lógica mejorada para préstamos indefinidos
-
+// src/hooks/usePagos.ts - Versión completa con hook principal
 import { useCallback } from 'react';
 import { collection, doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -32,14 +31,9 @@ interface PrestamoIndefinido {
 const limpiarDatosParaFirebase = (data: any) => {
   const cleaned = { ...data };
   
-  // Convertir undefined a null para Firebase
   Object.keys(cleaned).forEach(key => {
     if (cleaned[key] === undefined) {
       cleaned[key] = null;
-    }
-    // Convertir Date objects a Timestamp si es necesario
-    if (cleaned[key] instanceof Date) {
-      // Mantener las fechas como Date objects, Firebase las convertirá automáticamente
     }
   });
   
@@ -53,13 +47,12 @@ const generarNumeroPago = async (): Promise<string> => {
   const mes = (fecha.getMonth() + 1).toString().padStart(2, '0');
   const dia = fecha.getDate().toString().padStart(2, '0');
   
-  // Generar número secuencial simple
   const timestamp = Date.now().toString().slice(-4);
   return `PG${año}${mes}${dia}${timestamp}`;
 };
 
 // Distribución de pagos con validación de regla de capital
-const distribuirPagoPrestamoIndefinido = (
+export const distribuirPagoPrestamoIndefinido = (
   montoPagado: number,
   saldoCapital: number,
   interesesPendientes: number,
@@ -87,7 +80,6 @@ const distribuirPagoPrestamoIndefinido = (
   
   let montoCapital = 0;
   if (puedeAbonarCapital) {
-    // Si está al día en intereses, el resto va a capital
     montoCapital = Math.min(montoRestante, saldoCapital);
     montoRestante -= montoCapital;
   }
@@ -101,10 +93,9 @@ const distribuirPagoPrestamoIndefinido = (
   };
 };
 
-// Hook principal para pagos de préstamos indefinidos
+// Hook para préstamos indefinidos
 export const usePagosIndefinidos = (empresaActual: { id: string } | null, user: { uid: string } | null) => {
   
-  // Función principal para procesar pagos en préstamos indefinidos
   const procesarPagoPrestamoIndefinido = useCallback(async (
     prestamoId: string,
     montoPagado: number,
@@ -131,133 +122,120 @@ export const usePagosIndefinidos = (empresaActual: { id: string } | null, user: 
         clienteId: prestamoData.clienteId,
         estado: prestamoData.estado,
         ...prestamoData,
-        // Asegurar que fechaInicio sea un Date object
         fechaInicio: prestamoData.fechaInicio?.toDate?.() || prestamoData.fechaInicio || new Date(),
-        // Valores por defecto para propiedades opcionales
         esPlazoIndefinido: prestamoData.esPlazoIndefinido ?? true,
-        tipoTasa: prestamoData.tipoTasa || 'fija',
-        plazo: prestamoData.plazo || 0
+        saldoCapital: prestamoData.saldoCapital ?? prestamoData.monto,
+        interesesPendientes: prestamoData.interesesPendientes ?? 0,
+        moraAcumulada: prestamoData.moraAcumulada ?? 0,
+        interesesPagados: prestamoData.interesesPagados ?? 0
       };
 
-      // Verificar que es un préstamo indefinido
-      if (!esPrestamoIndefinido(prestamo)) {
-        throw new Error('Este proceso es solo para préstamos indefinidos');
-      }
-
-      // Calcular intereses acumulados hasta la fecha
-      const calculoIntereses = calcularInteresesPrestamoIndefinido(
-        prestamo.saldoCapital || prestamo.monto,
-        prestamo.tasaInteres,
-        prestamo.fechaInicio,
-        new Date(),
-        prestamo.interesesPendientes || 0
-      );
-
-      // Distribuir el pago según las reglas
+      // Calcular distribución del pago
       const distribucion = distribuirPagoPrestamoIndefinido(
         montoPagado,
         prestamo.saldoCapital || prestamo.monto,
-        calculoIntereses.totalInteresesPendientes,
+        prestamo.interesesPendientes || 0,
         prestamo.moraAcumulada || 0
       );
 
-      // Crear el registro de pago
-      const numero = await generarNumeroPago();
-      
-      const pagoData = {
-        empresaId: empresaActual.id,
-        numero,
-        prestamoId,
-        clienteId: prestamo.clienteId,
-        usuarioRegistro: user.uid,
-        montoPagado,
-        montoCapital: distribucion.montoCapital,
-        montoIntereses: distribucion.montoIntereses,
-        montoMora: distribucion.montoMora,
-        metodoPago,
-        fechaPago: new Date(),
-        fechaRegistro: serverTimestamp(),
-        esPrestamoIndefinido: true,
-        puedeAbonarCapital: distribucion.puedeAbonarCapital,
-        ...(referenciaPago && { referenciaPago }),
-        ...(observaciones && { observaciones })
-      };
-
-      // Calcular nuevos valores del préstamo
-      const nuevoSaldoCapital = (prestamo.saldoCapital || prestamo.monto) - distribucion.montoCapital;
-      const nuevosInteresesPendientes = calculoIntereses.totalInteresesPendientes - distribucion.montoIntereses;
-      const nuevaMoraAcumulada = (prestamo.moraAcumulada || 0) - distribucion.montoMora;
-
-      // Determinar el estado del préstamo
-      let nuevoEstado = prestamo.estado;
-      let fechaProximoPago: Date | null = null;
-      let montoProximoPago = 0;
-
-      if (nuevoSaldoCapital <= 0) {
-        // Préstamo finalizado
-        nuevoEstado = 'finalizado';
-        fechaProximoPago = null;
-        montoProximoPago = 0;
-      } else {
-        // Calcular próximo pago basado en el nuevo saldo capital
-        nuevoEstado = 'activo';
-        fechaProximoPago = calcularProximaFechaQuincenal(new Date());
-        montoProximoPago = recalcularProximoPagoIndefinido(nuevoSaldoCapital, prestamo.tasaInteres);
-      }
-
-      // Usar batch para operaciones atómicas
+      // Crear batch para transacción
       const batch = writeBatch(db);
       
-      // Crear el pago
-      const pagoRef = doc(collection(db, 'pagos'));
-      batch.set(pagoRef, limpiarDatosParaFirebase(pagoData));
+      // Generar número de pago
+      const numeroPago = await generarNumeroPago();
 
-      // Actualizar el préstamo
-      const prestamoActualizado = {
-        saldoCapital: nuevoSaldoCapital,
-        interesesPendientes: nuevosInteresesPendientes,
-        moraAcumulada: nuevaMoraAcumulada,
-        interesesPagados: (prestamo.interesesPagados || 0) + distribucion.montoIntereses,
-        fechaUltimoPago: new Date(),
-        fechaProximoPago,
-        montoProximoPago,
-        estado: nuevoEstado,
-        // Actualizar fecha de última actualización de intereses
-        fechaUltimaActualizacionIntereses: new Date()
-      };
-
-      const prestamoRef = doc(db, 'prestamos', prestamoId);
-      batch.update(prestamoRef, limpiarDatosParaFirebase(prestamoActualizado));
-
-      // Ejecutar transacción
-      await batch.commit();
-
-      // Mostrar resumen del pago
-      const mensajes = [];
-      if (distribucion.montoMora > 0) mensajes.push(`Mora: ${formatCurrency(distribucion.montoMora)}`);
-      if (distribucion.montoIntereses > 0) mensajes.push(`Intereses: ${formatCurrency(distribucion.montoIntereses)}`);
-      if (distribucion.montoCapital > 0) mensajes.push(`Capital: ${formatCurrency(distribucion.montoCapital)}`);
-      if (!distribucion.puedeAbonarCapital && distribucion.sobrante > 0) {
-        mensajes.push('⚠️ No se pudo abonar a capital: debe estar al día en intereses');
-      }
-
-      console.log('✅ Pago de préstamo indefinido procesado:', {
-        pagoId: pagoRef.id,
-        distribucion,
-        nuevoSaldoCapital,
-        nuevoEstado
+      // Preparar datos del pago
+      const pagoData = limpiarDatosParaFirebase({
+        numero: numeroPago,
+        prestamoId,
+        clienteId: prestamo.clienteId,
+        empresaId: empresaActual.id,
+        montoPagado,
+        montoMora: distribucion.montoMora,
+        montoIntereses: distribucion.montoIntereses,
+        montoCapital: distribucion.montoCapital,
+        sobrante: distribucion.sobrante,
+        metodoPago,
+        referenciaPago: referenciaPago || null,
+        observaciones: observaciones || null,
+        fechaPago: new Date(),
+        fechaCreacion: serverTimestamp(),
+        creadoPor: user.uid,
+        estado: 'completado'
       });
 
-      return pagoRef.id;
+      // Agregar el pago
+      const pagoRef = doc(collection(db, 'pagos'));
+      batch.set(pagoRef, pagoData);
 
-    } catch (error: unknown) {
-      console.error('❌ Error procesando pago de préstamo indefinido:', error);
-      throw new Error(error instanceof Error ? error.message : 'Error al procesar el pago');
+      // Actualizar el préstamo
+      const nuevoSaldoCapital = (prestamo.saldoCapital || prestamo.monto) - distribucion.montoCapital;
+      const nuevosInteresesPendientes = (prestamo.interesesPendientes || 0) - distribucion.montoIntereses;
+      const nuevosInteresesPagados = (prestamo.interesesPagados || 0) + distribucion.montoIntereses;
+      const nuevaMoraAcumulada = (prestamo.moraAcumulada || 0) - distribucion.montoMora;
+
+      const datosActualizacionPrestamo = limpiarDatosParaFirebase({
+        saldoCapital: nuevoSaldoCapital,
+        interesesPendientes: Math.max(0, nuevosInteresesPendientes),
+        interesesPagados: nuevosInteresesPagados,
+        moraAcumulada: Math.max(0, nuevaMoraAcumulada),
+        ultimaActualizacion: serverTimestamp(),
+        estado: nuevoSaldoCapital <= 0 ? 'pagado' : 'activo'
+      });
+
+      const prestamoRef = doc(db, 'prestamos', prestamoId);
+      batch.update(prestamoRef, datosActualizacionPrestamo);
+
+      // Ejecutar la transacción
+      await batch.commit();
+
+      console.log('✅ Pago procesado exitosamente:', numeroPago);
+      return numeroPago;
+
+    } catch (error: any) {
+      console.error('❌ Error procesando pago:', error);
+      throw new Error(error.message || 'Error al procesar el pago');
     }
   }, [empresaActual?.id, user?.uid]);
 
   return {
     procesarPagoPrestamoIndefinido,
     distribuirPagoPrestamoIndefinido
+  };
+};
+
+// Hook principal que incluye todas las funcionalidades de pagos
+export const usePagos = (empresaActual: { id: string } | null, user: { uid: string } | null) => {
+  const pagosIndefinidos = usePagosIndefinidos(empresaActual, user);
+
+  // Función genérica para procesar pagos (puede manejar diferentes tipos)
+  const procesarPago = useCallback(async (
+    prestamoId: string,
+    montoPagado: number,
+    metodoPago: string,
+    referenciaPago?: string,
+    observaciones?: string
+  ): Promise<string> => {
+    // Por ahora, asumimos que todos son préstamos indefinidos
+    // Aquí puedes agregar lógica para determinar el tipo de préstamo
+    return pagosIndefinidos.procesarPagoPrestamoIndefinido(
+      prestamoId,
+      montoPagado,
+      metodoPago,
+      referenciaPago,
+      observaciones
+    );
+  }, [pagosIndefinidos]);
+
+  return {
+    // Funciones genéricas
+    procesarPago,
+    
+    // Funciones específicas para préstamos indefinidos
+    procesarPagoPrestamoIndefinido: pagosIndefinidos.procesarPagoPrestamoIndefinido,
+    distribuirPagoPrestamoIndefinido: pagosIndefinidos.distribuirPagoPrestamoIndefinido,
+    
+    // Funciones de utilidad
+    distribuirPago: distribuirPagoPrestamoIndefinido
   };
 };

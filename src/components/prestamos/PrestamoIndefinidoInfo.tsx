@@ -1,3 +1,4 @@
+// src/components/prestamos/PrestamoIndefinidoInfo.tsx - CORREGIDO
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,8 +15,9 @@ import {
   calcularProximaFechaQuincenal 
 } from '@/types/prestamos';
 import { usePagosIndefinidos } from '@/hooks/usePagos';
-import { useAuth } from '@/hooks/useAuth';
-import { useEmpresa } from '@/hooks/useEmpresa';
+// ✅ IMPORTACIONES CORREGIDAS
+import { useAuth } from '@/context/AuthContext';
+import { useCompany } from '@/context/CompanyContext';
 
 interface PrestamoIndefinidoInfoProps {
   prestamo: {
@@ -42,8 +44,9 @@ const PrestamoIndefinidoInfo: React.FC<PrestamoIndefinidoInfoProps> = ({
   onPagoRegistrado = () => {},
   onActualizar = () => {}
 }) => {
-  const { user } = useAuth();
-  const { empresaActual } = useEmpresa();
+  // ✅ HOOKS CORREGIDOS
+  const { user, empresaActual } = useAuth();
+  const companyContext = useCompany(); // Este contexto está disponible pero puede no tener empresaActual
   
   // Hook con parámetros corregidos
   const { procesarPagoPrestamoIndefinido, distribuirPagoPrestamoIndefinido } = usePagosIndefinidos(
@@ -128,6 +131,17 @@ const PrestamoIndefinidoInfo: React.FC<PrestamoIndefinidoInfoProps> = ({
     }
   };
 
+  if (!empresaActual || !user) {
+    return (
+      <Alert>
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>
+          No hay empresa o usuario seleccionado. Por favor, inicia sesión y selecciona una empresa.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Información del préstamo */}
@@ -135,72 +149,73 @@ const PrestamoIndefinidoInfo: React.FC<PrestamoIndefinidoInfoProps> = ({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5" />
-            Información del Préstamo Indefinido
+            Información del Préstamo
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Cliente</Label>
-              <p className="font-medium">{prestamo.clienteNombre}</p>
+              <Label className="text-sm font-medium text-gray-600">Cliente</Label>
+              <p className="text-lg font-semibold">{prestamo.clienteNombre}</p>
             </div>
             <div>
-              <Label>Monto Original</Label>
-              <p className="font-medium">{formatCurrency(prestamo.monto)}</p>
+              <Label className="text-sm font-medium text-gray-600">Estado</Label>
+              <Badge variant={prestamo.estado === 'activo' ? 'default' : 'secondary'}>
+                {prestamo.estado}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-sm font-medium text-gray-600">Monto Original</Label>
+              <p className="text-lg font-semibold">{formatCurrency(prestamo.monto)}</p>
             </div>
             <div>
-              <Label>Saldo Capital</Label>
-              <p className="font-medium text-blue-600">
+              <Label className="text-sm font-medium text-gray-600">Tasa de Interés</Label>
+              <p className="text-lg font-semibold">{prestamo.tasaInteres}% quincenal</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <Label className="text-sm font-medium text-gray-600">Saldo Capital</Label>
+              <p className="text-lg font-semibold text-blue-600">
                 {formatCurrency(informacionActualizada.saldoCapital)}
               </p>
             </div>
             <div>
-              <Label>Tasa de Interés</Label>
-              <p className="font-medium">{prestamo.tasaInteres}% quincenal</p>
-            </div>
-            <div>
-              <Label>Intereses Pendientes</Label>
-              <p className="font-medium text-orange-600">
+              <Label className="text-sm font-medium text-gray-600">Intereses Pendientes</Label>
+              <p className="text-lg font-semibold text-orange-600">
                 {formatCurrency(informacionActualizada.interesesPendientes)}
               </p>
             </div>
             <div>
-              <Label>Mora Acumulada</Label>
-              <p className="font-medium text-red-600">
-                {formatCurrency(informacionActualizada.moraAcumulada)}
+              <Label className="text-sm font-medium text-gray-600">Total Adeudado</Label>
+              <p className="text-lg font-semibold text-red-600">
+                {formatCurrency(informacionActualizada.totalAdeudado)}
               </p>
             </div>
           </div>
-
-          <div className="pt-4 border-t">
-            <div className="flex justify-between items-center">
-              <span className="text-lg font-semibold">Total Adeudado:</span>
-              <span className="text-2xl font-bold text-red-600">
-                {formatCurrency(informacionActualizada.totalAdeudado)}
-              </span>
-            </div>
-          </div>
-
-          <Badge variant={prestamo.estado === 'activo' ? 'default' : 'secondary'}>
-            {prestamo.estado.toUpperCase()}
-          </Badge>
         </CardContent>
       </Card>
 
       {/* Formulario de pago */}
       <Card>
         <CardHeader>
-          <CardTitle>Registrar Pago</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            Registrar Pago
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="montoPago">Monto del Pago</Label>
+              <Label htmlFor="montoPago">Monto a Pagar</Label>
               <Input
                 id="montoPago"
                 type="number"
                 step="0.01"
-                min="0"
                 value={montoPago}
                 onChange={(e) => setMontoPago(e.target.value)}
                 placeholder="0.00"
@@ -210,7 +225,7 @@ const PrestamoIndefinidoInfo: React.FC<PrestamoIndefinidoInfoProps> = ({
               <Label htmlFor="metodoPago">Método de Pago</Label>
               <Select value={metodoPago} onValueChange={setMetodoPago}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Selecciona método" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="efectivo">Efectivo</SelectItem>
@@ -223,12 +238,12 @@ const PrestamoIndefinidoInfo: React.FC<PrestamoIndefinidoInfoProps> = ({
           </div>
 
           <div>
-            <Label htmlFor="referenciaPago">Referencia (Opcional)</Label>
+            <Label htmlFor="referenciaPago">Referencia de Pago (Opcional)</Label>
             <Input
               id="referenciaPago"
               value={referenciaPago}
               onChange={(e) => setReferenciaPago(e.target.value)}
-              placeholder="Número de transferencia, cheque, etc."
+              placeholder="Número de transacción, cheque, etc."
             />
           </div>
 
@@ -243,7 +258,7 @@ const PrestamoIndefinidoInfo: React.FC<PrestamoIndefinidoInfoProps> = ({
             />
           </div>
 
-          {/* Simulación de distribución de pago */}
+          {/* Simulación de distribución del pago */}
           {simulacionPago && (
             <Alert>
               <CheckCircle className="h-4 w-4" />
@@ -260,11 +275,11 @@ const PrestamoIndefinidoInfo: React.FC<PrestamoIndefinidoInfoProps> = ({
                     <p>• Capital: {formatCurrency(simulacionPago.montoCapital)}</p>
                   )}
                   {simulacionPago.sobrante > 0 && (
-                    <p>• Sobrante: {formatCurrency(simulacionPago.sobrante)}</p>
+                    <p className="text-orange-600">• Sobrante: {formatCurrency(simulacionPago.sobrante)}</p>
                   )}
-                  {!simulacionPago.puedeAbonarCapital && simulacionPago.sobrante > 0 && (
-                    <p className="text-amber-600 font-medium">
-                      ⚠️ No se puede abonar a capital: debe estar al día en intereses
+                  {!simulacionPago.puedeAbonarCapital && (
+                    <p className="text-red-600 text-sm">
+                      ⚠️ Debe pagar todos los intereses antes de abonar a capital
                     </p>
                   )}
                 </div>
