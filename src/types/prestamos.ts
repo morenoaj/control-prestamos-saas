@@ -139,21 +139,21 @@ export const formatDate = (date: Date | string | null | undefined): string => {
 };
 
 // Función para convertir Timestamp a Date
-export const convertirFecha = (timestamp: any): Date => {
+export const convertirFecha = (timestamp: unknown): Date => {
   if (!timestamp) return new Date();
   
   // Si ya es un Date
   if (timestamp instanceof Date) return timestamp;
   
   // Si es un Timestamp de Firebase
-  if (timestamp.toDate && typeof timestamp.toDate === 'function') {
-    return timestamp.toDate();
+  if (timestamp && typeof timestamp === 'object' && 'toDate' in timestamp && typeof (timestamp as { toDate: () => Date }).toDate === 'function') {
+    return (timestamp as { toDate: () => Date }).toDate();
   }
   
   // Si es un string o número
   try {
     return new Date(timestamp);
-  } catch (error) {
+  } catch {
     return new Date();
   }
 };
@@ -336,7 +336,7 @@ export interface ResumenMensual {
 }
 
 // Función para validar datos de préstamo antes de guardar
-export const validarDatosPrestamo = (prestamo: any): { esValido: boolean; errores: string[] } => {
+export const validarDatosPrestamo = (prestamo: Record<string, unknown>): { esValido: boolean; errores: string[] } => {
   const errores: string[] = [];
 
   // Validaciones básicas
@@ -370,8 +370,92 @@ export const validarDatosPrestamo = (prestamo: any): { esValido: boolean; errore
   };
 };
 
-// Export default para facilitar importaciones
-export default {
+
+
+// Función mejorada para calcular intereses quincenales en préstamos indefinidos
+export const calcularInteresesPrestamoIndefinido = (
+  saldoCapital: number,
+  tasaInteres: number,
+  fechaInicio: Date,
+  fechaActual: Date = new Date(),
+  interesesPendientesAnteriores: number = 0
+): CalculoQuincenal => {
+  const fechaBase = new Date(fechaInicio);
+  
+  // Los intereses SIEMPRE se calculan sobre el saldo capital actual
+  const interesesPorQuincena = saldoCapital * (tasaInteres / 100);
+  
+  // Calcular períodos vencidos desde la fecha de inicio
+  const periodosVencidos: PeriodoQuincenal[] = [];
+  let totalInteresesNuevos = 0;
+  
+  let fechaIteracion = new Date(fechaBase);
+  while (fechaIteracion < fechaActual) {
+    const proximaFecha = calcularProximaFechaQuincenal(fechaIteracion);
+    
+    if (proximaFecha <= fechaActual) {
+      const diasVencido = Math.floor((fechaActual.getTime() - proximaFecha.getTime()) / (1000 * 60 * 60 * 24));
+      
+      periodosVencidos.push({
+        fecha: proximaFecha,
+        montoIntereses: interesesPorQuincena,
+        vencido: true,
+        diasVencido
+      });
+      
+      totalInteresesNuevos += interesesPorQuincena;
+    }
+    
+    fechaIteracion = proximaFecha;
+  }
+  
+  // Total de intereses pendientes = anteriores + nuevos generados
+  const totalInteresesPendientes = interesesPendientesAnteriores + totalInteresesNuevos;
+  
+  // Próxima fecha de pago
+  const proximaFechaPago = calcularProximaFechaQuincenal(fechaActual);
+  
+  // Período actual
+  const periodoActual: PeriodoQuincenal = {
+    fecha: proximaFechaPago,
+    montoIntereses: interesesPorQuincena,
+    vencido: false,
+    diasVencido: 0
+  };
+  
+  return {
+    interesesActuales: interesesPorQuincena,
+    interesesAtrasados: totalInteresesNuevos,
+    totalInteresesPendientes,
+    capitalPendiente: saldoCapital,
+    totalAPagar: totalInteresesPendientes, // Solo intereses hasta estar al día
+    proximaFechaPago,
+    periodosVencidos,
+    periodoActual
+  };
+};
+
+// Validar si se puede abonar a capital (REGLA CLAVE)
+export const puedeAbonarCapital = (interesesPendientes: number): boolean => {
+  return interesesPendientes <= 0;
+};
+
+// Función para recalcular próximo pago en préstamos indefinidos
+export const recalcularProximoPagoIndefinido = (
+  saldoCapitalActual: number,
+  tasaInteres: number
+): number => {
+  // Si el capital es 0, no hay próximo pago
+  if (saldoCapitalActual <= 0) {
+    return 0;
+  }
+  
+  // El próximo pago son solo los intereses sobre el capital restante
+  return saldoCapitalActual * (tasaInteres / 100);
+};
+
+// Actualizar el export default para incluir las nuevas funciones
+const prestamoUtils = {
   formatCurrency,
   formatDate,
   convertirFecha,
@@ -379,11 +463,15 @@ export default {
   calcularDiasEntreFechas,
   calcularProximaFechaQuincenal,
   calcularInteresesQuincenales,
+  calcularInteresesPrestamoIndefinido, // NUEVA
   formatearProximoPago,
   esPrestamoIndefinido,
   calcularMontoProximoPagoSeguro,
   validarDatosPrestamo,
+  puedeAbonarCapital, // NUEVA
+  recalcularProximoPagoIndefinido, // NUEVA
   PERIODOS_QUINCENAL,
   LIMITES_SISTEMA
 };
 
+export default prestamoUtils;
