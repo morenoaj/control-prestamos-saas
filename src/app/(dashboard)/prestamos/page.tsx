@@ -1,4 +1,4 @@
-// src/app/(dashboard)/prestamos/page.tsx - VERSIÓN COMPLETA CON IMPORTACIÓN
+// src/app/(dashboard)/prestamos/page.tsx - VERSIÓN LIMPIA Y CORREGIDA
 'use client'
 
 import { useState, useMemo } from 'react'
@@ -9,13 +9,6 @@ import { usePagos } from '@/hooks/usePagos'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Select,
   SelectContent,
@@ -34,36 +27,28 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { PrestamoForm } from '@/components/prestamos/PrestamoForm'
-import { PagoForm } from '@/components/pagos/PagoForm'
+import { PrestamoCard } from '@/components/prestamos/PrestamoCard'
+import { PrestamoDetailsModal } from '@/components/prestamos/PrestamoDetailsModal'
 import { PrestamoImportExportDialog } from '@/components/prestamos/PrestamoImportExportDialog'
+import { PagoForm } from '@/components/pagos/PagoForm'
 import { 
   CreditCard, 
   Plus, 
   Search, 
-  MoreHorizontal,
-  Edit,
-  Eye,
-  Trash2,
   DollarSign,
   TrendingUp,
   AlertCircle,
   RefreshCw,
   Loader2,
-  CheckCircle,
-  XCircle,
-  Calendar,
-  Infinity,
-  Users,
   Filter,
-  Clock,
-  Upload,
-  Download,
-  FileSpreadsheet
+  Users,
+  FileSpreadsheet,
+  Upload
 } from 'lucide-react'
-import { Prestamo } from '@/types/database'
-import { formatCurrency, formatDate, convertirFecha } from '@/lib/utils'
+import { Prestamo, Cliente } from '@/types/database'
+import { formatCurrency } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
-import { Timestamp, doc, addDoc, collection } from 'firebase/firestore'
+import { Timestamp, addDoc, collection } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 
 export default function PrestamosPage() {
@@ -76,86 +61,150 @@ export default function PrestamosPage() {
     crearPrestamo,
     actualizarPrestamo,
     eliminarPrestamo,
-    calcularMontoCuota,
     recargarPrestamos
   } = usePrestamos()
-  const { procesarPagoAutomatico } = usePagos()
+  const { procesarPago } = usePagos(empresaActual, usuario ? { uid: usuario.id } : null)
 
-  // Estados para UI
+  // Estados para modales y formularios
+  const [showPrestamoForm, setShowPrestamoForm] = useState(false)
+  const [showPagoForm, setShowPagoForm] = useState(false)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [showImportExportDialog, setShowImportExportDialog] = useState(false)
+  
+  // Estados para préstamos seleccionados
+  const [prestamoSeleccionado, setPrestamoSeleccionado] = useState<Prestamo | null>(null)
+  const [prestamoParaPago, setPrestamoParaPago] = useState<Prestamo | null>(null)
+  const [prestamoAEliminar, setPrestamoAEliminar] = useState<Prestamo | null>(null)
+  
+  // Estados para filtros y búsqueda
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('todos')
-  const [showPrestamoForm, setShowPrestamoForm] = useState(false)
-  const [prestamoSeleccionado, setPrestamoSeleccionado] = useState<Prestamo | null>(null)
-  const [showPagoForm, setShowPagoForm] = useState(false)
-  const [prestamoParaPago, setPrestamoParaPago] = useState<Prestamo | null>(null)
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [prestamoAEliminar, setPrestamoAEliminar] = useState<Prestamo | null>(null)
-  const [showImportExportDialog, setShowImportExportDialog] = useState(false)
-
-  // Estados para operaciones async
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+
+  // Obtener cliente por ID
+  const obtenerCliente = (clienteId: string): Cliente | null => {
+    return clientes.find(c => c.id === clienteId) || null
+  }
 
   // Filtrar préstamos
   const prestamosFiltrados = useMemo(() => {
     return prestamos.filter(prestamo => {
-      const cliente = clientes.find(c => c.id === prestamo.clienteId)
-      const nombreCompleto = cliente ? `${cliente.nombre} ${cliente.apellido}`.toLowerCase() : ''
-      const numero = prestamo.numero.toLowerCase()
-      
-      const matchesSearch = searchTerm === '' || 
+      const cliente = obtenerCliente(prestamo.clienteId)
+      if (!cliente) return false
+
+      const nombreCompleto = `${cliente.nombre} ${cliente.apellido}`.toLowerCase()
+      const cumpleBusqueda = searchTerm === '' || 
+        prestamo.numero.toLowerCase().includes(searchTerm.toLowerCase()) ||
         nombreCompleto.includes(searchTerm.toLowerCase()) ||
-        numero.includes(searchTerm.toLowerCase())
+        cliente.cedula.includes(searchTerm)
 
-      const matchesStatus = statusFilter === 'todos' || prestamo.estado === statusFilter
+      const cumpleEstado = statusFilter === 'todos' || prestamo.estado === statusFilter
 
-      return matchesSearch && matchesStatus
+      return cumpleBusqueda && cumpleEstado
     })
   }, [prestamos, clientes, searchTerm, statusFilter])
 
-  // Estadísticas
+  // Calcular estadísticas
   const estadisticas = useMemo(() => {
     const total = prestamos.length
     const activos = prestamos.filter(p => p.estado === 'activo').length
-    const enMora = prestamos.filter(p => p.diasAtraso > 0 || p.estado === 'atrasado').length
-    const completados = prestamos.filter(p => p.estado === 'finalizado').length
-    
+    const finalizados = prestamos.filter(p => p.estado === 'finalizado').length
+    const atrasados = prestamos.filter(p => p.estado === 'atrasado').length
     const montoTotal = prestamos.reduce((sum, p) => sum + p.monto, 0)
     const saldoPendiente = prestamos
       .filter(p => p.estado === 'activo')
-      .reduce((sum, p) => sum + p.saldoCapital, 0)
-    
+      .reduce((sum, p) => sum + (p.saldoCapital || p.monto), 0)
+
     return {
       total,
       activos,
-      enMora,
-      completados,
+      finalizados,
+      atrasados,
+      enMora: atrasados,
       montoTotal,
       saldoPendiente
     }
   }, [prestamos])
 
-  // Función para generar número único de préstamo
-  const generarNumeroPrestamo = (): string => {
-    const año = new Date().getFullYear()
-    const mes = String(new Date().getMonth() + 1).padStart(2, '0')
-    const ultimoNumero = prestamos.length + 1
-    const secuencial = String(ultimoNumero).padStart(3, '0')
-    return `PRES${año}${mes}${secuencial}`
+  // Manejadores de eventos para préstamos
+  const handleVerDetalles = (prestamo: Prestamo) => {
+    console.log('👁️ Ver detalles del préstamo:', prestamo.numero)
+    setPrestamoSeleccionado(prestamo)
+    setShowDetailsModal(true)
   }
 
-  // Handlers
+  const handleEditarPrestamo = (prestamo: Prestamo) => {
+    console.log('✏️ Editar préstamo:', prestamo.numero)
+    setPrestamoSeleccionado(prestamo)
+    setShowPrestamoForm(true)
+  }
+
+  const handleEliminarPrestamo = (prestamo: Prestamo) => {
+    console.log('🗑️ Solicitar eliminación del préstamo:', prestamo.numero)
+    setPrestamoAEliminar(prestamo)
+    setShowDeleteDialog(true)
+  }
+
+  const handleRegistrarPago = (prestamo: Prestamo) => {
+    console.log('💰 Registrar pago para préstamo:', prestamo.numero)
+    setPrestamoParaPago(prestamo)
+    setShowPagoForm(true)
+  }
+
+  // Confirmar eliminación
+  const confirmarEliminacion = async () => {
+    if (!prestamoAEliminar) return
+
+    setIsDeleting(true)
+    try {
+      await eliminarPrestamo(prestamoAEliminar.id)
+      toast({
+        title: 'Préstamo eliminado',
+        description: `El préstamo ${prestamoAEliminar.numero} ha sido eliminado exitosamente.`,
+      })
+      setPrestamoAEliminar(null)
+      setShowDeleteDialog(false)
+    } catch (error) {
+      console.error('Error eliminando préstamo:', error)
+      toast({
+        title: 'Error',
+        description: 'No se pudo eliminar el préstamo. Inténtalo de nuevo.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  // Recargar datos
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    try {
+      await recargarPrestamos()
+      toast({
+        title: 'Datos actualizados',
+        description: 'Los préstamos han sido actualizados exitosamente.',
+      })
+    } catch (error) {
+      console.error('Error recargando préstamos:', error)
+      toast({
+        title: 'Error',
+        description: 'No se pudieron actualizar los datos.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  // Crear préstamo
   const handleCrearPrestamo = async (data: any) => {
     try {
-      if (!empresaActual?.id || !usuario?.id) {
-        throw new Error('Información de empresa o usuario no disponible')
-      }
-
       const prestamoData = {
-        numero: data.numero || generarNumeroPrestamo(),
-        empresaId: empresaActual.id,
-        usuarioCreador: usuario.id,
         clienteId: data.clienteId,
+        numero: `P-${Date.now()}`,
         monto: data.monto,
         tasaInteres: data.tasaInteres,
         tipoTasa: data.tipoTasa,
@@ -177,7 +226,9 @@ export default function PrestamosPage() {
         interesesPagados: 0,
         diasAtraso: 0,
         moraAcumulada: 0,
-        observaciones: data.observaciones || ''
+        observaciones: data.observaciones || '',
+        usuarioCreador: usuario?.id || '',
+        empresaId: empresaActual?.id || ''
       }
 
       await crearPrestamo(prestamoData)
@@ -197,7 +248,8 @@ export default function PrestamosPage() {
     }
   }
 
-  const handleEditarPrestamo = async (data: any) => {
+  // Editar préstamo
+  const handleEditarPrestamoGuardar = async (data: any) => {
     try {
       if (!prestamoSeleccionado) return
 
@@ -219,41 +271,25 @@ export default function PrestamosPage() {
     }
   }
 
-  const handleEliminarPrestamo = async () => {
-    if (!prestamoAEliminar) return
-    
-    setIsDeleting(true)
+  // Procesar pago con manejo correcto del tipo de retorno
+  const handleProcesarPago = async (
+    prestamoId: string, 
+    montoPagado: number, 
+    metodoPago: string, 
+    referenciaPago?: string, 
+    observaciones?: string
+  ) => {
     try {
-      await eliminarPrestamo(prestamoAEliminar.id)
-      setShowDeleteDialog(false)
-      setPrestamoAEliminar(null)
-      
-      toast({
-        title: "Préstamo eliminado",
-        description: "El préstamo se eliminó correctamente",
-      })
-    } catch (error: any) {
-      console.error('Error eliminando préstamo:', error)
-      toast({
-        title: "Error al eliminar",
-        description: error.message || "No se pudo eliminar el préstamo",
-        variant: "destructive"
-      })
-    } finally {
-      setIsDeleting(false)
-    }
-  }
-
-  const handleProcesarPago = async (prestamoId: string, montoPagado: number, metodoPago: string, referenciaPago?: string, observaciones?: string) => {
-    try {
-      await procesarPagoAutomatico(prestamoId, montoPagado, metodoPago, observaciones)
-      setShowPagoForm(false)
-      setPrestamoParaPago(null)
+      await procesarPago(prestamoId, montoPagado, metodoPago, referenciaPago, observaciones)
       
       toast({
         title: "Pago registrado",
-        description: "El pago se procesó correctamente",
+        description: "El pago se procesó exitosamente",
       })
+      
+      setShowPagoForm(false)
+      setPrestamoParaPago(null)
+      await recargarPrestamos()
     } catch (error: any) {
       console.error('Error procesando pago:', error)
       toast({
@@ -264,54 +300,34 @@ export default function PrestamosPage() {
     }
   }
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true)
-    try {
-      await recargarPrestamos()
-      toast({
-        title: "Datos actualizados",
-        description: "La información se actualizó correctamente",
-      })
-    } catch (error) {
-      toast({
-        title: "Error al actualizar",
-        description: "No se pudieron actualizar los datos",
-        variant: "destructive"
-      })
-    } finally {
-      setIsRefreshing(false)
-    }
-  }
-
-  // Función para manejar préstamos importados
+  // Manejar importación de préstamos
   const handlePrestamosImportados = async (prestamosData: any[]) => {
     try {
-      if (!empresaActual?.id || !usuario?.id) {
-        throw new Error('Información de empresa o usuario no disponible')
-      }
-
       let exitosos = 0
       let errores = 0
 
       for (const { prestamo, cliente } of prestamosData) {
         try {
-          // Limpiar datos antes de guardar - remover valores undefined
+          if (!cliente) {
+            console.warn('Cliente no encontrado para préstamo:', prestamo.numero)
+            errores++
+            continue
+          }
+
           const prestamoLimpio = {
-            numero: prestamo.numero || generarNumeroPrestamo(),
-            empresaId: empresaActual.id,
-            usuarioCreador: usuario.id,
-            clienteId: prestamo.clienteId,
-            monto: prestamo.monto,
-            tasaInteres: prestamo.tasaInteres,
-            tipoTasa: prestamo.tipoTasa,
-            // Solo incluir plazo si no es indefinido
-            ...(prestamo.esPlazoIndefinido ? {} : { plazo: prestamo.plazo }),
+            empresaId: empresaActual?.id || '',
+            clienteId: cliente.id,
+            usuarioCreador: usuario?.id || '',
+            numero: prestamo.numero || `P-${Date.now()}-${exitosos}`,
+            monto: prestamo.monto || 0,
+            tasaInteres: prestamo.tasaInteres || 0,
+            tipoTasa: prestamo.tipoTasa || 'mensual',
+            plazo: prestamo.esPlazoIndefinido ? undefined : prestamo.plazo,
             esPlazoIndefinido: prestamo.esPlazoIndefinido || false,
-            // Convertir fechas a Timestamp correctamente
-            fechaInicio: Timestamp.fromDate(prestamo.fechaInicio),
-            fechaCreacion: Timestamp.fromDate(prestamo.fechaCreacion || new Date()),
-            // Solo incluir fechaVencimiento si no es indefinido
-            ...(prestamo.fechaVencimiento ? { fechaVencimiento: Timestamp.fromDate(prestamo.fechaVencimiento) } : {}),
+            fechaInicio: prestamo.fechaInicio ? Timestamp.fromDate(prestamo.fechaInicio) : Timestamp.now(),
+            fechaCreacion: prestamo.fechaCreacion ? Timestamp.fromDate(prestamo.fechaCreacion) : Timestamp.now(),
+            ...(prestamo.fechaVencimiento && !prestamo.esPlazoIndefinido ? 
+              { fechaVencimiento: Timestamp.fromDate(prestamo.fechaVencimiento) } : {}),
             metodoPago: prestamo.metodoPago || 'efectivo',
             proposito: prestamo.proposito || '',
             garantia: prestamo.garantia || '',
@@ -321,9 +337,7 @@ export default function PrestamosPage() {
             interesesPagados: 0,
             diasAtraso: 0,
             moraAcumulada: 0,
-            // Solo incluir fechaProximoPago si no es indefinido
             ...(prestamo.fechaProximoPago ? { fechaProximoPago: Timestamp.fromDate(prestamo.fechaProximoPago) } : {}),
-            // Solo incluir montoProximoPago si tiene valor
             ...(prestamo.montoProximoPago ? { montoProximoPago: prestamo.montoProximoPago } : {}),
             observaciones: prestamo.observaciones || ''
           }
@@ -339,89 +353,70 @@ export default function PrestamosPage() {
       toast({
         title: "Importación completada",
         description: `${exitosos} préstamos importados${errores > 0 ? `, ${errores} errores` : ''}`,
-        variant: errores > 0 ? "destructive" : "default"
+        variant: errores > 0 ? 'destructive' : 'default'
       })
 
-      // Recargar la lista
       await recargarPrestamos()
-      
     } catch (error: any) {
       console.error('Error en importación masiva:', error)
       toast({
         title: "Error en importación",
-        description: error.message || "No se pudieron importar los préstamos",
+        description: error.message || "Error al importar préstamos",
         variant: "destructive"
       })
     }
   }
 
-  const getEstadoBadge = (prestamo: Prestamo) => {
-    switch (prestamo.estado) {
-      case 'activo':
-        return <Badge className="bg-green-100 text-green-800">Activo</Badge>
-      case 'atrasado':
-        return <Badge className="bg-red-100 text-red-800">En Mora</Badge>
-      case 'finalizado':
-        return <Badge className="bg-blue-100 text-blue-800">Finalizado</Badge>
-      case 'cancelado':
-        return <Badge className="bg-gray-100 text-gray-800">Cancelado</Badge>
-      case 'pendiente':
-        return <Badge className="bg-yellow-100 text-yellow-800">Pendiente</Badge>
-      default:
-        return <Badge className="bg-yellow-100 text-yellow-800">Pendiente</Badge>
-    }
+  // Éxito al procesar pago
+  const handlePagoSuccess = () => {
+    setShowPagoForm(false)
+    setPrestamoParaPago(null)
+    recargarPrestamos()
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-6 w-6 animate-spin" />
-          <span>Cargando préstamos...</span>
-        </div>
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-2">Cargando préstamos...</span>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Error al cargar préstamos</h3>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <Button onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Reintentar
-          </Button>
-        </div>
+      <div className="text-center py-8">
+        <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold mb-2">Error al cargar préstamos</h2>
+        <p className="text-gray-600 mb-4">{error}</p>
+        <Button onClick={handleRefresh}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Reintentar
+        </Button>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      {/* Header con título y acciones */}
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Gestión de Préstamos</h1>
-          <p className="text-gray-600">Administra tu cartera de préstamos</p>
+          <h1 className="text-3xl font-bold">Préstamos</h1>
+          <p className="text-gray-600">Gestiona todos los préstamos de tu empresa</p>
         </div>
-        
-        <div className="flex flex-wrap gap-2">
-          <Button
+        <div className="flex gap-3">
+          <Button 
+            variant="outline" 
             onClick={() => setShowImportExportDialog(true)}
-            variant="outline"
-            className="flex items-center gap-2"
           >
-            <Upload className="h-4 w-4" />
-            <Download className="h-4 w-4" />
+            <Upload className="h-4 w-4 mr-2" />
             Importar/Exportar
           </Button>
           
-          <Button
+          <Button 
+            variant="outline" 
             onClick={handleRefresh}
-            variant="outline"
             disabled={isRefreshing}
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -490,12 +485,12 @@ export default function PrestamosPage() {
         </Card>
       </div>
 
-      {/* Filtros y Búsqueda */}
+      {/* Filtros y búsqueda */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
           <Input
-            placeholder="Buscar por cliente o número de préstamo..."
+            placeholder="Buscar por número, cliente o cédula..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10"
@@ -504,165 +499,109 @@ export default function PrestamosPage() {
         
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-full sm:w-48">
-            <SelectValue placeholder="Filtrar por estado" />
+            <Filter className="h-4 w-4 mr-2" />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todos los estados</SelectItem>
-            <SelectItem value="activo">Activo</SelectItem>
-            <SelectItem value="atrasado">Atrasado</SelectItem>
-            <SelectItem value="finalizado">Finalizado</SelectItem>
-            <SelectItem value="cancelado">Cancelado</SelectItem>
-            <SelectItem value="pendiente">Pendiente</SelectItem>
+            <SelectItem value="activo">Activos</SelectItem>
+            <SelectItem value="finalizado">Finalizados</SelectItem>
+            <SelectItem value="atrasado">Atrasados</SelectItem>
+            <SelectItem value="cancelado">Cancelados</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      {/* Lista de Préstamos */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Préstamos ({prestamosFiltrados.length})</span>
-            {prestamosFiltrados.length !== prestamos.length && (
-              <Badge variant="outline">
-                {prestamosFiltrados.length} de {prestamos.length}
-              </Badge>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {prestamosFiltrados.length === 0 ? (
-            <div className="text-center py-12">
-              <CreditCard className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {searchTerm || statusFilter !== 'todos' ? 'No se encontraron préstamos' : 'No hay préstamos registrados'}
-              </h3>
-              <p className="text-gray-600 mb-4">
-                {searchTerm || statusFilter !== 'todos' 
-                  ? 'Intenta ajustar los filtros de búsqueda'
-                  : 'Comienza creando tu primer préstamo'
-                }
-              </p>
-              {(!searchTerm && statusFilter === 'todos') && (
-                <Button onClick={() => setShowPrestamoForm(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Crear Primer Préstamo
-                </Button>
-              )}
+      {/* Lista de préstamos con diseño elegante */}
+      <div className="space-y-6">
+        {/* Header del listado */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
+              <Users className="h-5 w-5 text-white" />
             </div>
-          ) : (
-            <div className="space-y-4">
-              {prestamosFiltrados.map((prestamo) => {
-                const cliente = clientes.find(c => c.id === prestamo.clienteId)
-                const montoCuota = calcularMontoCuota ? calcularMontoCuota(prestamo) : 0
-                
-                return (
-                  <div
-                    key={prestamo.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="font-semibold">{prestamo.numero}</h3>
-                        {getEstadoBadge(prestamo)}
-                        {prestamo.diasAtraso > 0 && (
-                          <Badge className="bg-red-100 text-red-800">
-                            {prestamo.diasAtraso} días atraso
-                          </Badge>
-                        )}
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm text-gray-600">
-                        <div>
-                          <span className="font-medium">Cliente:</span><br />
-                          {cliente ? `${cliente.nombre} ${cliente.apellido}` : 'Cliente no encontrado'}
-                        </div>
-                        
-                        <div>
-                          <span className="font-medium">Monto:</span><br />
-                          {formatCurrency(prestamo.monto)}
-                        </div>
-                        
-                        <div>
-                          <span className="font-medium">Saldo:</span><br />
-                          {formatCurrency(prestamo.saldoCapital)}
-                        </div>
-                        
-                        <div>
-                          <span className="font-medium">Próximo pago:</span><br />
-                          {prestamo.esPlazoIndefinido ? (
-                            <span className="flex items-center gap-1">
-                              <Infinity className="h-3 w-3" />
-                              Indefinido
-                            </span>
-                          ) : (
-                            prestamo.fechaProximoPago 
-                              ? formatDate(prestamo.fechaProximoPago)
-                              : 'No definido'
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setPrestamoSeleccionado(prestamo)
-                            setShowPrestamoForm(true)
-                          }}
-                        >
-                          <Eye className="h-4 w-4 mr-2" />
-                          Ver detalles
-                        </DropdownMenuItem>
-                        
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setPrestamoSeleccionado(prestamo)
-                            setShowPrestamoForm(true)
-                          }}
-                        >
-                          <Edit className="h-4 w-4 mr-2" />
-                          Editar
-                        </DropdownMenuItem>
-                        
-                        {prestamo.estado === 'activo' && (
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setPrestamoParaPago(prestamo)
-                              setShowPagoForm(true)
-                            }}
-                          >
-                            <DollarSign className="h-4 w-4 mr-2" />
-                            Registrar pago
-                          </DropdownMenuItem>
-                        )}
-                        
-                        <DropdownMenuItem
-                          onClick={() => {
-                            setPrestamoAEliminar(prestamo)
-                            setShowDeleteDialog(true)
-                          }}
-                          className="text-red-600"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Eliminar
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                )
-              })}
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">
+                Préstamos Activos ({prestamosFiltrados.length})
+              </h2>
+              <p className="text-sm text-gray-600">
+                Gestiona y monitorea todos tus préstamos
+              </p>
+            </div>
+          </div>
+          
+          {prestamosFiltrados.length > 0 && (
+            <div className="text-sm text-gray-500">
+              Total en cartera: <span className="font-semibold text-green-600">
+                {formatCurrency(prestamosFiltrados.reduce((sum, p) => sum + (p.saldoCapital || p.monto), 0))}
+              </span>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Formulario de Préstamo */}
+        {/* Contenido del listado */}
+        {prestamosFiltrados.length === 0 ? (
+          <Card className="border-2 border-dashed border-gray-200">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <div className="w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl flex items-center justify-center mb-4">
+                <FileSpreadsheet className="h-8 w-8 text-gray-400" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                {prestamos.length === 0 ? 'Aún no tienes préstamos' : 'No se encontraron préstamos'}
+              </h3>
+              <p className="text-gray-600 text-center max-w-md mb-6">
+                {prestamos.length === 0 
+                  ? 'Comienza creando tu primer préstamo para empezar a gestionar tu cartera de créditos.'
+                  : 'Intenta cambiar los filtros de búsqueda para encontrar los préstamos que buscas.'
+                }
+              </p>
+              {prestamos.length === 0 && (
+                <Button 
+                  onClick={() => setShowPrestamoForm(true)}
+                  className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Crear Tu Primer Préstamo
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-1">
+            {prestamosFiltrados.map((prestamo) => {
+              const cliente = obtenerCliente(prestamo.clienteId)
+              if (!cliente) return null
+
+              return (
+                <PrestamoCard
+                  key={prestamo.id}
+                  prestamo={prestamo}
+                  cliente={cliente}
+                  onViewDetails={handleVerDetalles}
+                  onEdit={handleEditarPrestamo}
+                  onDelete={handleEliminarPrestamo}
+                  onRegisterPayment={handleRegistrarPago}
+                />
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Modal de detalles del préstamo */}
+      <PrestamoDetailsModal
+        prestamo={prestamoSeleccionado}
+        cliente={prestamoSeleccionado ? obtenerCliente(prestamoSeleccionado.clienteId) : null}
+        isOpen={showDetailsModal}
+        onClose={() => {
+          setShowDetailsModal(false)
+          setPrestamoSeleccionado(null)
+        }}
+        onEdit={handleEditarPrestamo}
+        onRegisterPayment={handleRegistrarPago}
+      />
+
+      {/* Formulario de préstamo */}
       <PrestamoForm
         isOpen={showPrestamoForm}
         onClose={() => {
@@ -670,10 +609,10 @@ export default function PrestamosPage() {
           setPrestamoSeleccionado(null)
         }}
         prestamo={prestamoSeleccionado}
-        onSave={prestamoSeleccionado ? handleEditarPrestamo : handleCrearPrestamo}
+        onSave={prestamoSeleccionado ? handleEditarPrestamoGuardar : handleCrearPrestamo}
       />
 
-      {/* Formulario de Pago */}
+      {/* Formulario de pago */}
       {prestamoParaPago && (
         <PagoForm
           open={showPagoForm}
@@ -696,10 +635,11 @@ export default function PrestamosPage() {
             estado: prestamoParaPago.estado
           }]}
           onPagoRegistrado={handleProcesarPago}
+          onSuccess={handlePagoSuccess}
         />
       )}
 
-      {/* Diálogo de Importación/Exportación */}
+      {/* Diálogo de importación/exportación */}
       <PrestamoImportExportDialog
         isOpen={showImportExportDialog}
         onClose={() => setShowImportExportDialog(false)}
@@ -708,7 +648,7 @@ export default function PrestamosPage() {
         onPrestamosImportados={handlePrestamosImportados}
       />
 
-      {/* Diálogo de Confirmación de Eliminación */}
+      {/* Diálogo de confirmación de eliminación */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -722,7 +662,7 @@ export default function PrestamosPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleEliminarPrestamo}
+              onClick={confirmarEliminacion}
               disabled={isDeleting}
               className="bg-red-600 hover:bg-red-700"
             >

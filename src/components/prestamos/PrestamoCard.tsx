@@ -1,7 +1,6 @@
-// ✅ ARCHIVO: src/components/prestamos/PrestamoCard.tsx - CORREGIDO
+// src/components/prestamos/PrestamoCard.tsx - DISEÑO CLEAN Y MODERNO
 'use client'
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,70 +11,29 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { 
-  Calendar, 
   DollarSign, 
   User, 
-  MoreHorizontal,
-  AlertTriangle,
-  CheckCircle,
+  CheckCircle, 
+  AlertCircle, 
+  XCircle, 
   Clock,
-  Infinity,
+  MoreHorizontal,
   Eye,
   Edit,
-  Trash2
+  Trash2,
+  Infinity,
+  CreditCard,
+  Calendar,
+  Percent
 } from 'lucide-react'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { Prestamo, Cliente } from '@/types/database'
 
-// ✅ FUNCIÓN MEJORADA PARA FORMATEAR MONEDA (maneja NaN, undefined, null)
-const formatCurrency = (amount: number | undefined | null): string => {
-  if (amount === undefined || amount === null || isNaN(amount)) {
-    return '$0.00'
-  }
-  
-  const validAmount = Number(amount)
-  if (isNaN(validAmount) || validAmount < 0) {
-    return '$0.00'
-  }
-  
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(validAmount)
-}
-
-// ✅ FUNCIÓN MEJORADA PARA CALCULAR PRÓXIMA FECHA QUINCENAL
-const calcularProximaFechaQuincenal = (fechaActual: Date = new Date()): Date => {
-  const fecha = new Date(fechaActual)
-  const dia = fecha.getDate()
-  
-  if (dia < 15) {
-    fecha.setDate(15)
-  } else if (dia === 15) {
-    fecha.setDate(30)
-    if (fecha.getDate() !== 30) {
-      fecha.setDate(0) // Último día del mes para febrero
-    }
-  } else if (dia < 30) {
-    fecha.setDate(30)
-    if (fecha.getDate() !== 30) {
-      fecha.setDate(0) // Último día del mes
-    }
-  } else {
-    fecha.setMonth(fecha.getMonth() + 1, 15)
-  }
-  
-  return fecha
-}
-
-// ✅ FUNCIÓN PARA VALIDAR SI UNA FECHA ES VÁLIDA
-const validarFecha = (fecha: any): Date | null => {
-  if (!fecha) return null
-  
+// Función para convertir fechas de Firestore
+const convertFirebaseDate = (fecha: any): Date | null => {
   try {
+    if (!fecha) return null
     if (fecha instanceof Date) {
       return isNaN(fecha.getTime()) ? null : fecha
     }
@@ -107,268 +65,317 @@ export function PrestamoCard({
   onRegisterPayment 
 }: PrestamoCardProps) {
 
-  // ✅ REFORZAR LÓGICA DE DETECCIÓN DE PRÉSTAMOS INDEFINIDOS
-  const esPrestamoIndefinido = prestamo.tipoTasa === 'indefinido' || 
-                              prestamo.esPlazoIndefinido || 
-                              !prestamo.plazo || 
-                              prestamo.plazo <= 0
+  // Detección de préstamos indefinidos - CORREGIDA
+  const esPrestamoIndefinido = prestamo.esPlazoIndefinido === true || 
+                              prestamo.tipoTasa === 'indefinido'
+  // NO incluir: !prestamo.plazo || prestamo.plazo <= 0
+  // Porque un préstamo quincenal CON plazo debe mostrar fechas
 
-  // ✅ AGREGAR DEBUG TEMPORAL (remover en producción)
-  console.log('🔍 Verificación préstamo:', prestamo.numero, {
-    esPlazoIndefinido: prestamo.esPlazoIndefinido,
-    tipoTasa: prestamo.tipoTasa,
-    plazo: prestamo.plazo,
-    resultadoFinal: esPrestamoIndefinido
-  })
-
-  // ✅ CALCULAR PRÓXIMO PAGO REAL CON VALIDACIONES
+  // Calcular próximo pago
   const calcularProximoPagoReal = () => {
-    // Validar datos básicos
     const saldoCapital = prestamo.saldoCapital || prestamo.monto || 0
     const tasaInteres = prestamo.tasaInteres || 0
 
+    // Si no hay saldo o tasa, no hay pago
     if (saldoCapital <= 0 || tasaInteres <= 0) {
-      return {
-        monto: 0,
-        fecha: new Date(),
-        esValido: false,
-        mensaje: 'Datos insuficientes'
-      }
+      return { monto: 0, fecha: new Date(), esValido: false }
     }
 
     if (esPrestamoIndefinido) {
-      // ✅ PRÉSTAMOS QUINCENALES INDEFINIDOS
+      // Para préstamos indefinidos - calcular próxima fecha de pago (15 o 30)
       const interesesQuincenales = saldoCapital * (tasaInteres / 100)
-      const fechaProximoPago = calcularProximaFechaQuincenal()
-
-      return {
-        monto: interesesQuincenales,
-        fecha: fechaProximoPago,
+      const proximaFechaPago = calcularProximaFechaPagoQuincenal()
+      
+      return { 
+        monto: interesesQuincenales, 
+        fecha: proximaFechaPago, 
         esValido: true,
-        tipo: 'quincenal',
-        mensaje: 'Intereses quincenales + abono libre al capital'
+        esIndefinido: true
       }
     } else {
-      // ✅ PRÉSTAMOS CON PLAZO FIJO
-      let montoProximoPago = prestamo.montoProximoPago || 0
-      let fechaProximoPago = validarFecha(prestamo.fechaProximoPago) || new Date()
-
-      // Si montoProximoPago es inválido, calcular cuota básica
-      if (isNaN(montoProximoPago) || montoProximoPago <= 0) {
-        const plazo = prestamo.plazo || 1
-        montoProximoPago = (saldoCapital + (saldoCapital * tasaInteres / 100)) / plazo
+      // Para préstamos con plazo fijo
+      const montoCuota = prestamo.montoProximoPago || 0
+      let fechaProximoPago = null
+      
+      // Intentar obtener la fecha del próximo pago
+      if (prestamo.fechaProximoPago) {
+        fechaProximoPago = convertFirebaseDate(prestamo.fechaProximoPago)
+      }
+      
+      // Si no hay fecha programada, calcular basada en la fecha de inicio
+      if (!fechaProximoPago && prestamo.fechaInicio) {
+        const fechaInicio = convertFirebaseDate(prestamo.fechaInicio)
+        if (fechaInicio) {
+          fechaProximoPago = new Date(fechaInicio)
+          // Agregar el período según el tipo de tasa
+          switch (prestamo.tipoTasa) {
+            case 'mensual':
+              fechaProximoPago.setMonth(fechaProximoPago.getMonth() + 1)
+              break
+            case 'quincenal':
+              fechaProximoPago.setDate(fechaProximoPago.getDate() + 15)
+              break
+            case 'anual':
+              fechaProximoPago.setFullYear(fechaProximoPago.getFullYear() + 1)
+              break
+            default:
+              fechaProximoPago.setMonth(fechaProximoPago.getMonth() + 1)
+          }
+        }
+      }
+      
+      // Si aún no hay fecha, usar fecha actual + período
+      if (!fechaProximoPago) {
+        fechaProximoPago = new Date()
+        switch (prestamo.tipoTasa) {
+          case 'mensual':
+            fechaProximoPago.setMonth(fechaProximoPago.getMonth() + 1)
+            break
+          case 'quincenal':
+            fechaProximoPago.setDate(fechaProximoPago.getDate() + 15)
+            break
+          case 'anual':
+            fechaProximoPago.setFullYear(fechaProximoPago.getFullYear() + 1)
+            break
+          default:
+            fechaProximoPago.setMonth(fechaProximoPago.getMonth() + 1)
+        }
       }
 
-      return {
-        monto: montoProximoPago,
-        fecha: fechaProximoPago,
-        esValido: !isNaN(montoProximoPago) && montoProximoPago > 0,
-        tipo: 'fijo',
-        mensaje: 'Cuota fija'
+      return { 
+        monto: montoCuota || (saldoCapital * (tasaInteres / 100)), 
+        fecha: fechaProximoPago, 
+        esValido: true,
+        esIndefinido: false
       }
+    }
+  }
+
+  // Función para calcular la próxima fecha de pago (15 o 30 del mes)
+  const calcularProximaFechaPagoQuincenal = (): Date => {
+    const hoy = new Date()
+    const dia = hoy.getDate()
+    const mes = hoy.getMonth()
+    const año = hoy.getFullYear()
+    
+    // Si estamos antes del 15, el próximo pago es el 15
+    if (dia < 15) {
+      return new Date(año, mes, 15)
+    }
+    // Si estamos entre el 15 y 30, el próximo pago es el 30 (o último día del mes)
+    else if (dia < 30) {
+      const ultimoDiaDelMes = new Date(año, mes + 1, 0).getDate()
+      const diaPago = Math.min(30, ultimoDiaDelMes)
+      return new Date(año, mes, diaPago)
+    }
+    // Si ya pasó el 30, el próximo pago es el 15 del siguiente mes
+    else {
+      return new Date(año, mes + 1, 15)
     }
   }
 
   const proximoPago = calcularProximoPagoReal()
 
+  // Calcular progreso
+  const saldoCapital = prestamo.saldoCapital || prestamo.monto
+  const progreso = ((prestamo.monto - saldoCapital) / prestamo.monto) * 100
+
+  // Estados minimalistas
+  const getEstadoIcon = () => {
+    switch (prestamo.estado) {
+      case 'activo': return <Clock className="h-3 w-3" />
+      case 'finalizado': return <CheckCircle className="h-3 w-3" />
+      case 'atrasado': return <AlertCircle className="h-3 w-3" />
+      default: return <XCircle className="h-3 w-3" />
+    }
+  }
+
   const getBadgeVariant = () => {
     switch (prestamo.estado) {
       case 'activo': return 'default'
-      case 'atrasado': return 'destructive'
       case 'finalizado': return 'secondary'
-      case 'cancelado': return 'outline'
-      default: return 'default'
+      case 'atrasado': return 'destructive'
+      default: return 'outline'
     }
   }
 
-  const getBadgeIcon = () => {
-    switch (prestamo.estado) {
-      case 'activo': return <CheckCircle className="h-3 w-3" />
-      case 'atrasado': return <AlertTriangle className="h-3 w-3" />
-      case 'finalizado': return <CheckCircle className="h-3 w-3" />
-      case 'cancelado': return <Clock className="h-3 w-3" />
-      default: return null
-    }
-  }
+  // Manejadores de eventos
+  const handleViewDetails = () => onViewDetails?.(prestamo)
+  const handleEdit = () => onEdit?.(prestamo)
+  const handleDelete = () => onDelete?.(prestamo)
+  const handleRegisterPayment = () => onRegisterPayment?.(prestamo)
 
   return (
-    <Card className="p-4 space-y-4 border hover:shadow-md transition-all duration-200">
-      {/* ✅ HEADER CON NÚMERO Y ESTADO */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-100 p-2 rounded-lg">
-            <DollarSign className="h-5 w-5 text-blue-600" />
+    <div className="group bg-white border border-gray-200 rounded-xl p-5 sm:p-6 hover:border-gray-300 hover:shadow-sm transition-all duration-200">
+      
+      {/* Header limpio y espacioso */}
+      <div className="flex items-start justify-between mb-5">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-3 mb-2">
+            <h2 className="text-xl font-bold text-gray-900 truncate">{prestamo.numero}</h2>
+            <Badge variant={getBadgeVariant()} className="flex items-center gap-1 text-xs">
+              {getEstadoIcon()}
+              {prestamo.estado}
+            </Badge>
           </div>
+          
+          <div className="flex items-center text-gray-600 text-sm">
+            <User className="h-4 w-4 mr-1.5 text-gray-400" />
+            <span className="font-medium truncate">{cliente.nombre} {cliente.apellido}</span>
+          </div>
+        </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 p-0"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            
+            <DropdownMenuItem onClick={handleViewDetails}>
+              <Eye className="mr-2 h-4 w-4" />
+              Ver detalles
+            </DropdownMenuItem>
+            
+            <DropdownMenuItem onClick={handleEdit}>
+              <Edit className="mr-2 h-4 w-4" />
+              Editar
+            </DropdownMenuItem>
+            
+            {prestamo.estado === 'activo' && (
+              <DropdownMenuItem onClick={handleRegisterPayment}>
+                <CreditCard className="mr-2 h-4 w-4" />
+                Registrar pago
+              </DropdownMenuItem>
+            )}
+            
+            <DropdownMenuSeparator />
+            
+            <DropdownMenuItem onClick={handleDelete} className="text-red-600">
+              <Trash2 className="mr-2 h-4 w-4" />
+              Eliminar
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Sección financiera principal */}
+      <div className="space-y-4 mb-5">
+        
+        {/* Montos principales */}
+        <div className="flex justify-between items-center">
           <div>
-            <h3 className="font-semibold text-lg">{prestamo.numero}</h3>
-            <p className="text-sm text-gray-600 flex items-center gap-1">
-              <User className="h-3 w-3" />
-              {cliente.nombre} {cliente.apellido}
-            </p>
+            <div className="text-sm text-gray-500 mb-0.5">Monto prestado</div>
+            <div className="text-2xl font-bold text-gray-900">
+              {formatCurrency(prestamo.monto)}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-sm text-gray-500 mb-0.5">Saldo actual</div>
+            <div className="text-2xl font-bold text-gray-900">
+              {formatCurrency(saldoCapital)}
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={getBadgeVariant()} className="flex items-center gap-1">
-            {getBadgeIcon()}
-            {prestamo.estado}
-          </Badge>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 p-0">
-                <span className="sr-only">Abrir menú</span>
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {onViewDetails && (
-                <DropdownMenuItem onClick={() => onViewDetails(prestamo)}>
-                  <Eye className="mr-2 h-4 w-4" />
-                  Ver detalles
-                </DropdownMenuItem>
-              )}
-              {onEdit && (
-                <DropdownMenuItem onClick={() => onEdit(prestamo)}>
-                  <Edit className="mr-2 h-4 w-4" />
-                  Editar
-                </DropdownMenuItem>
-              )}
-              {onDelete && (
-                <DropdownMenuItem 
-                  onClick={() => onDelete(prestamo)}
-                  className="text-red-600"
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Eliminar
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
 
-      {/* ✅ INFORMACIÓN PRINCIPAL - MONTO Y SALDO */}
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <span className="text-gray-600">Monto:</span>
-          <p className="font-semibold text-green-600">{formatCurrency(prestamo.monto)}</p>
-        </div>
-        <div>
-          <span className="text-gray-600">Saldo:</span>
-          <p className="font-semibold text-orange-600">
-            {formatCurrency(prestamo.saldoCapital || prestamo.monto)}
-          </p>
-        </div>
-      </div>
-
-      {/* ✅ INFORMACIÓN PRINCIPAL - TASA Y PLAZO CORREGIDOS */}
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <span className="text-gray-600">Tasa:</span>
-          <p className="font-semibold text-blue-600">
-            {prestamo.tasaInteres}% {prestamo.tipoTasa === 'indefinido' ? 'quincenal' : prestamo.tipoTasa}
-          </p>
-        </div>
-        <div>
-          <span className="text-gray-600">Plazo:</span>
-          <p className="font-semibold">
-            {/* ✅ CORREGIR: Mostrar "Indefinido" cuando tipoTasa es 'indefinido' */}
-            {prestamo.tipoTasa === 'indefinido' || prestamo.esPlazoIndefinido || !prestamo.plazo || prestamo.plazo <= 0 ? (
-              <span className="text-purple-600 flex items-center gap-1">
-                <Infinity className="h-4 w-4" />
-                Indefinido
-              </span>
-            ) : prestamo.plazo ? (
-              `${prestamo.plazo} ${prestamo.tipoTasa}${prestamo.plazo > 1 ? 's' : ''}`
-            ) : (
-              <span className="text-purple-600 flex items-center gap-1">
-                <Infinity className="h-4 w-4" />
-                Indefinido
-              </span>
-            )}
-          </p>
-        </div>
-      </div>
-
-      {/* ✅ FECHAS - VENCIMIENTO "INDEFINIDO" CORREGIDO */}
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <span className="text-gray-600">Inicio:</span>
-          <p className="font-semibold">
-            {validarFecha(prestamo.fechaInicio)?.toLocaleDateString('es-PA') || 'No definida'}
-          </p>
-        </div>
-        <div>
-          <span className="text-gray-600">Vencimiento:</span>
-          <p className="font-semibold">
-            {/* ✅ CORREGIR: Mostrar "Indefinido" cuando tipoTasa es 'indefinido' */}
-            {prestamo.tipoTasa === 'indefinido' || prestamo.esPlazoIndefinido || !prestamo.plazo || prestamo.plazo <= 0 ? (
-              <span className="text-purple-600 flex items-center gap-1">
-                <Infinity className="h-4 w-4" />
-                Indefinido
-              </span>
-            ) : validarFecha(prestamo.fechaVencimiento) ? (
-              validarFecha(prestamo.fechaVencimiento)!.toLocaleDateString('es-PA')
-            ) : (
-              <span className="text-purple-600 flex items-center gap-1">
-                <Infinity className="h-4 w-4" />
-                Indefinido
-              </span>
-            )}
-          </p>
-        </div>
-      </div>
-
-      {/* ✅ PRÓXIMO PAGO - CON VALORES REALES Y SIN USDNaN */}
-      {prestamo.estado !== 'finalizado' && proximoPago.esValido && (
-        <Alert className={`border-blue-200 ${proximoPago.monto > 0 ? 'bg-blue-50' : 'bg-yellow-50'}`}>
-          <Calendar className={`h-4 w-4 ${proximoPago.monto > 0 ? 'text-blue-600' : 'text-yellow-600'}`} />
-          <AlertDescription>
-            <div className="space-y-2">
-              <div className={`font-semibold ${proximoPago.monto > 0 ? 'text-blue-900' : 'text-yellow-900'}`}>
-                Próximo pago: {formatCurrency(proximoPago.monto)}
+        {/* Próximo pago destacado */}
+        <div className="bg-gray-50 rounded-lg p-3">
+          <div className="flex justify-between items-center">
+            <div>
+              <div className="text-sm text-gray-600 mb-0.5">Próximo pago</div>
+              <div className="text-lg font-bold text-gray-900">
+                {proximoPago.esValido ? formatCurrency(proximoPago.monto) : 'No calculado'}
               </div>
-              
-              <div className={proximoPago.monto > 0 ? 'text-blue-700' : 'text-yellow-700'}>
-                Fecha: {proximoPago.fecha.toLocaleDateString('es-PA')}
-              </div>
-              
-              {proximoPago.mensaje && (
-                <div className="text-xs text-gray-600">
-                  {proximoPago.mensaje}
-                </div>
-              )}
-
-              {onRegisterPayment && proximoPago.monto > 0 && (
-                <Button
-                  size="sm"
-                  className="mt-2"
-                  onClick={() => onRegisterPayment(prestamo)}
-                >
-                  Registrar Pago
-                </Button>
-              )}
             </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* ✅ PROPÓSITO */}
-      {prestamo.proposito && (
-        <div className="text-sm">
-          <span className="text-gray-600">Propósito:</span>
-          <p className="text-gray-800 mt-1">{prestamo.proposito}</p>
+            <div className="text-right">
+              <div className="text-sm text-gray-600 mb-0.5">
+                {esPrestamoIndefinido ? 'Próxima fecha' : 'Vence el'}
+              </div>
+              <div className="text-sm font-semibold text-gray-900">
+                {esPrestamoIndefinido ? (
+                  proximoPago.fecha ? (
+                    <span className="text-blue-600 font-bold">
+                      {formatDate(proximoPago.fecha)}
+                    </span>
+                  ) : (
+                    <span className="text-gray-500">Sin calcular</span>
+                  )
+                ) : proximoPago.esValido && proximoPago.fecha ? (
+                  <span className="text-blue-600 font-bold">
+                    {formatDate(proximoPago.fecha)}
+                  </span>
+                ) : (
+                  <span className="text-gray-500">Sin programar</span>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      )}
 
-      {/* ✅ OBSERVACIONES */}
-      {prestamo.observaciones && (
-        <div className="text-sm">
-          <span className="text-gray-600">Observaciones:</span>
-          <p className="text-gray-600 mt-1 italic">{prestamo.observaciones}</p>
+        {/* Barra de progreso elegante */}
+        <div>
+          <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+            <span>Progreso del préstamo</span>
+            <span className="font-medium">{progreso.toFixed(0)}%</span>
+          </div>
+          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gray-900 rounded-full transition-all duration-700 ease-out"
+              style={{ width: `${Math.min(progreso, 100)}%` }}
+            />
+          </div>
         </div>
-      )}
-    </Card>
+      </div>
+
+      {/* Detalles del préstamo */}
+      <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm mb-5">
+        <div className="flex items-center text-gray-600">
+          <Percent className="h-4 w-4 mr-1.5 text-gray-400" />
+          <span>{prestamo.tasaInteres}% {prestamo.tipoTasa === 'indefinido' ? 'quincenal' : prestamo.tipoTasa}</span>
+        </div>
+        
+        <div className="flex items-center text-gray-600">
+          <Calendar className="h-4 w-4 mr-1.5 text-gray-400" />
+          {esPrestamoIndefinido ? (
+            <span className="flex items-center gap-1">
+              <Infinity className="h-3 w-3" />
+              Plazo indefinido
+            </span>
+          ) : (
+            <span>{prestamo.plazo} {prestamo.tipoTasa}</span>
+          )}
+        </div>
+
+        <div className="flex items-center text-gray-600">
+          <User className="h-4 w-4 mr-1.5 text-gray-400" />
+          <span>Cédula: {cliente.cedula}</span>
+        </div>
+      </div>
+
+      {/* Footer con acción */}
+      <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+        <div className="text-xs text-gray-400">
+          Creado {formatDate(convertFirebaseDate(prestamo.fechaCreacion) || new Date())}
+        </div>
+
+        {prestamo.estado === 'activo' && (
+          <Button 
+            onClick={handleRegisterPayment}
+            size="sm"
+            className="bg-gray-900 hover:bg-gray-800 text-white px-4"
+          >
+            <CreditCard className="h-3 w-3 mr-1.5" />
+            Pagar
+          </Button>
+        )}
+      </div>
+    </div>
   )
 }
