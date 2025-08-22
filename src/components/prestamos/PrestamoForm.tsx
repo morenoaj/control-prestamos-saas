@@ -895,37 +895,99 @@ export function PrestamoForm({ isOpen, onClose, prestamo, onSave }: PrestamoForm
                     </div>
                   </TabsContent>
                   
-                  <TabsContent value="avanzado">
-                    <div className="space-y-4">
-                      {/* Fecha Personalizada */}
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-medium">Fecha de creación personalizada</Label>
-                          <Switch
-                            checked={watchedFields.usarFechaPersonalizada ?? false}
-                            onCheckedChange={(checked: boolean) => setValue('usarFechaPersonalizada', checked)}
-                          />
-                        </div>
-                        
-                        {(watchedFields.usarFechaPersonalizada ?? false) && (
-                          <div className="space-y-2">
-                            <Input
-                              type="date"
-                              {...register('fechaCreacion', { 
-                                valueAsDate: true,
-                                setValueAs: (value) => value ? new Date(value) : new Date()
-                              })}
-                              defaultValue={formatearFechaParaInput(new Date())}
-                              max={formatearFechaParaInput(new Date())}
-                              className="h-12"
-                            />
-                            <div className="flex items-center gap-2 text-xs text-blue-600">
-                              <Info className="h-3 w-3" />
-                              <span>Para registrar préstamos realizados en el pasado</span>
+<TabsContent value="avanzado">
+                        <div className="space-y-4">
+                          {/* Fecha Personalizada - SECCIÓN MEJORADA */}
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 bg-blue-600 rounded-full">
+                                  <Clock className="h-5 w-5 text-white" />
+                                </div>
+                                <div>
+                                  <Label className="text-base font-semibold text-blue-900">¿Este préstamo se realizó en el pasado?</Label>
+                                  <p className="text-sm text-blue-700 mt-1">
+                                    Configura la fecha real para cálculos precisos de intereses e historial
+                                  </p>
+                                </div>
+                              </div>
+                              <Switch
+                                checked={watchedFields.usarFechaPersonalizada ?? false}
+                                onCheckedChange={(checked: boolean) => setValue('usarFechaPersonalizada', checked)}
+                              />
                             </div>
+                            
+                            {(watchedFields.usarFechaPersonalizada ?? false) && (
+                              <div className="space-y-4 p-4 bg-white rounded-lg border-2 border-blue-200 shadow-sm">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div className="space-y-2">
+                                    <Label className="text-sm font-medium text-gray-900">
+                                      Fecha en que se realizó el préstamo
+                                    </Label>
+                                    <Input
+                                      type="date"
+                                      {...register('fechaCreacion', { 
+                                        valueAsDate: true,
+                                        setValueAs: (value) => value ? new Date(value) : new Date()
+                                      })}
+                                      defaultValue={formatearFechaParaInput(new Date())}
+                                      max={formatearFechaParaInput(new Date())}
+                                      className="h-12 text-base border-blue-200 focus:border-blue-400"
+                                    />
+                                    {errors.fechaCreacion && (
+                                      <p className="text-sm text-red-600">{errors.fechaCreacion.message}</p>
+                                    )}
+                                  </div>
+                                  
+                                  <div className="space-y-3">
+                                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                      <div className="flex items-center gap-2 text-blue-800 font-medium mb-2">
+                                        <Info className="h-4 w-4" />
+                                        Beneficios de configurar la fecha
+                                      </div>
+                                      <ul className="text-sm text-blue-700 space-y-1">
+                                        <li className="flex items-center gap-2">
+                                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                          Intereses calculados correctamente
+                                        </li>
+                                        <li className="flex items-center gap-2">
+                                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                          Fechas de vencimiento precisas
+                                        </li>
+                                        <li className="flex items-center gap-2">
+                                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                          Reportes históricos exactos
+                                        </li>
+                                        <li className="flex items-center gap-2">
+                                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                          Control total de tu cartera
+                                        </li>
+                                      </ul>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {/* Previsualización de la fecha seleccionada */}
+                                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                                  <div className="flex items-center gap-2">
+                                    <Check className="h-4 w-4 text-green-600" />
+                                    <span className="text-sm font-medium text-green-800">
+                                      Préstamo se registrará con fecha: {
+                                        watchedFields.fechaCreacion 
+                                          ? new Date(watchedFields.fechaCreacion).toLocaleDateString('es-PA', {
+                                              weekday: 'long',
+                                              year: 'numeric',
+                                              month: 'long',
+                                              day: 'numeric'
+                                            })
+                                          : 'Fecha no seleccionada'
+                                      }
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
 
                       {/* Garantía */}
                       <div className="space-y-2">
